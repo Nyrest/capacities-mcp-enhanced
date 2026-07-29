@@ -1,0 +1,36 @@
+{
+  "name": "capacities-mcp-v2",
+  "version": "0.1.0",
+  "description": "Agent-oriented Capacities API 2.0 MCP server built with xmcp",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched src tests scripts package.json tsconfig.json xmcp.config.ts biome.json",
+    "format": "biome format --write src tests scripts package.json tsconfig.json xmcp.config.ts biome.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:live": "bun test tests/live/capacities.live.test.ts",
+    "build": "bun run lint && bun run typecheck && xmcp build",
+    "verify:tools": "bun run scripts/verify-tools.ts",
+    "dev": "xmcp dev",
+    "start": "node dist/stdio.js"
+  },
+  "dependencies": {
+    "@capacities/api": "1.0.1",
+    "xmcp": "0.6.13",
+    "zod": "^4.0.0"
+  },
+  "main": "./dist/stdio.js",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "capacities-mcp-v2": "./dist/stdio.js"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
+  }
+}
