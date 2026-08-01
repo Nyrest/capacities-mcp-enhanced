@@ -2,6 +2,14 @@
   "name": "capacities-mcp-enhanced",
   "version": "0.4.0",
   "description": "Agent-oriented Capacities API 2.0 MCP server built with xmcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nyrest/capacities-mcp-enhanced.git"
+  },
+  "homepage": "https://github.com/Nyrest/capacities-mcp-enhanced#readme",
+  "bugs": {
+    "url": "https://github.com/Nyrest/capacities-mcp-enhanced/issues"
+  },
   "engines": {
     "node": ">=20.0.0"
   },
