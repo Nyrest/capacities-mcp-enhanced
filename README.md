@@ -1,4 +1,4 @@
-# Capacities MCP — API 2.0 for AI Agents
+# Capacities MCP Enhanced — API 2.0 for AI Agents
 
 🧠 Give Codex, Claude, Hermes, and any MCP-compatible agent a reliable way to work with your Capacities space.
 
@@ -36,7 +36,7 @@ Generate a token in **Capacities → Settings → Capacities API → Generate ne
   "mcpServers": {
     "capacities": {
       "command": "npx",
-      "args": ["--yes", "capacities-mcp-v2@latest"],
+      "args": ["--yes", "capacities-mcp-enhanced@latest"],
       "env": {
         "CAPACITIES_API_TOKEN": "cap-api-your-token"
       }
@@ -53,7 +53,7 @@ mcp_servers:
     command: "npx"
     args:
       - "--yes"
-      - "capacities-mcp-v2@latest"
+      - "capacities-mcp-enhanced@latest"
     env:
       CAPACITIES_API_TOKEN: "cap-api-your-token"
     supports_parallel_tool_calls: true
@@ -64,7 +64,7 @@ mcp_servers:
 By installing the Capacities MCP Best Practices skill, your agent can learn the full workflow, strict content schemas, safe mutation patterns, rate-limit recovery, and common pitfalls.
 
 ```bash
-npx skills add nyrest/capacities-mcp-v2
+npx skills add nyrest/capacities-mcp-enhanced
 ```
 
 ## 🧰 What agents can do

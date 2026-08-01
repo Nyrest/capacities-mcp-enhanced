@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "capacities-mcp-v2",
+      "name": "capacities-mcp-enhanced",
       "dependencies": {
         "@capacities/api": "1.0.1",
         "xmcp": "0.6.13",
