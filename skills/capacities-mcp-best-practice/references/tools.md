@@ -9,6 +9,7 @@ Use this reference to select tools and construct top-level arguments. Tool names
 - [Object creation](#object-creation)
 - [Object and block mutations](#object-and-block-mutations)
 - [Daily Notes](#daily-notes)
+- [Media uploads](#media-uploads)
 - [Common sequencing patterns](#common-sequencing-patterns)
 
 ## Common conventions
@@ -213,6 +214,41 @@ Soft-delete or permanently delete an object.
 | `apiToken` | string | No | Per-call token override. |
 
 Use soft deletion unless the user explicitly requests permanent deletion and understands it cannot be recovered. A verified deletion may be represented by a readback not-found result.
+
+## Media uploads
+
+### `upload_files`
+
+Upload one or more local files as Capacities media objects. The server streams
+multipart parts from disk, never expects Base64 in the MCP payload, and verifies
+each completed object with an independent `GET /object`.
+
+| Parameter | Type | Required | Meaning |
+|---|---|---:|---|
+| `files` | object[], 1–100 | Yes | Each item has an absolute local `path`, optional `title`, and optional `fileType`. Relative paths are rejected. |
+| `collections` | UUID[] | No | Collection IDs shared by every file; `[]` selects the media structure default. |
+| `mode` | `wait` or `background` | No | Default `wait`; background returns a job ID immediately. |
+| `apiToken` | string | No | Per-call token override. |
+
+Use `mode: "background"` for large or long batches. A successful upload item
+contains the media object and readback verification. A `partial` job means
+independent files succeeded and failed separately; do not replay the entire
+batch.
+
+### `manage_upload_job`
+
+Manage a background job in the current MCP process.
+
+| Parameter | Type | Required | Meaning |
+|---|---|---:|---|
+| `jobId` | UUID | Yes | ID returned by `upload_files`. |
+| `action` | `status`, `wait`, or `cancel` | Yes | Immediate status, bounded wait, or cancellation. |
+| `timeoutSeconds` | integer 1–300 | No | Maximum wait duration for `action: "wait"`; default 60. |
+| `apiToken` | string | No | Per-call token override. |
+
+Cancellation aborts pending upload sessions but preserves media objects that
+already completed. Job state is in-process only and is not recoverable after a
+server restart.
 
 ## Daily Notes
 

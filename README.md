@@ -14,6 +14,7 @@ Capacities MCP brings rich, read-write access to your knowledge base through one
 - **Safer writes** — independent readback verification, soft deletion by default, scoped rate-limit retries, and rollback for failed multi-stage Markdown creates.
 - **Concurrency-safe object operations** — same-object reads can run concurrently, while writes use an exclusive lock and automatically wait for active reads or other writes; different objects proceed concurrently.
 - **Faithful rich content** — headings, nested blocks, grids, toggles, tasks, links, entity references, colors, code, and math.
+- **Agent-friendly media uploads** — stream one or many local files, report progress, verify media objects, and manage long-running jobs without exposing multipart internals.
 - **Bundled best-practice skill** — a complete agent operating guide is included, so a model can use the server correctly without already knowing Capacities.
 
 ## 🚀 Quick start
@@ -86,6 +87,10 @@ npx skills add nyrest/capacities-mcp-enhanced
 | Update content | `delete_object` | Move an object to trash or permanently delete it when explicitly requested. |
 | Daily Notes | `append_daily_note` | Add structured blocks to today's or a dated Daily Note. |
 | Daily Notes | `append_daily_note_markdown` | Add Markdown to today's or a dated Daily Note. |
+| Media uploads | `upload_files` | Stream one or more local files into Capacities media objects with readback verification. |
+| Media uploads | `manage_upload_job` | Inspect, wait for, or cancel an in-process background upload job. |
+
+`upload_files` accepts absolute local file paths only; relative paths, directories, and empty files are rejected. Background upload jobs live only in the current MCP process and retain terminal status for a limited time.
 
 ## ⚙️ Optional controls
 
@@ -96,6 +101,9 @@ CAPACITIES_MCP_READBACK=on
 ```
 
 Set either rate-limit value to `0` to disable automatic retry waiting. Set `CAPACITIES_MCP_READBACK=off` to disable ordinary mutation readback when minimizing API usage is more important than immediate verification.
+
+
+`upload_files` accepts absolute local file paths only; relative paths, directories, and empty files are rejected. Background upload jobs live only in the current MCP process and retain terminal status for a limited time.
 
 Reads for the same object can run concurrently. A mutation obtains an exclusive
 object lock, so it waits for active reads and other writes; reads arriving

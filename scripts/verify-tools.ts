@@ -13,6 +13,7 @@ type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
   anyOf?: JsonSchema[];
+  enum?: unknown[];
   definitions?: Record<string, JsonSchema>;
   additionalProperties?: boolean | JsonSchema;
 };
@@ -30,9 +31,11 @@ const expectedTools = [
   "delete_object",
   "get_object",
   "inspect_space",
+  "manage_upload_job",
   "search_objects",
   "update_block",
   "update_object",
+  "upload_files",
 ];
 
 function expect(condition: unknown, message: string): asserts condition {
@@ -255,6 +258,28 @@ try {
   expect(
     sourceUrl?.pattern?.includes("https?"),
     "create_object_from_url.url must be schema-constrained to HTTP(S)",
+  );
+
+  const upload = tools.find(({ name }) => name === "upload_files");
+  expect(upload, "upload_files tool is missing");
+  const uploadSchema = upload.inputSchema as JsonSchema;
+  expect(
+    uploadSchema.properties?.files?.type === "array" &&
+      uploadSchema.properties.files.minItems === 1 &&
+      uploadSchema.properties.files.maxItems === 100,
+    "upload_files.files must expose the 1-100 range",
+  );
+  expect(
+    uploadSchema.properties?.mode?.enum?.includes("background"),
+    "upload_files.mode must expose background mode",
+  );
+
+  const manage = tools.find(({ name }) => name === "manage_upload_job");
+  expect(manage, "manage_upload_job tool is missing");
+  const manageSchema = manage.inputSchema as JsonSchema;
+  expect(
+    manageSchema.properties?.action?.enum?.join(",") === "status,wait,cancel",
+    "manage_upload_job.action must expose status, wait, and cancel",
   );
 
   console.log(

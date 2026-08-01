@@ -98,6 +98,9 @@ Capacities API errors retain `cap_*` codes. Important local MCP codes:
 | `mcp_transaction_rolled_back` | Markdown create's later patch failed and the new object was permanently deleted and verified absent |
 | `mcp_configuration_error` | Token or environment configuration is missing/invalid |
 | `mcp_unexpected` | Unexpected local failure |
+| `mcp_upload_invalid_path` | A local upload source was not an absolute path |
+| `mcp_upload_file_not_found` | A local upload source was missing or unreadable |
+| `mcp_upload_job_not_found` | A background job is not retained by this MCP process |
 
 Common Capacities codes include `cap_not_found`, authentication/permission errors, validation errors, and `cap_rate_limit_exceeded`. Preserve the exact `code`, `message`, and `details` when explaining a failure.
 
@@ -195,6 +198,12 @@ When `cap_rate_limit_exceeded` escapes the MCP:
 6. For `stage: "readback"`, re-run only `get_object`, not the mutation.
 7. For `stage: "rollback_delete"` or `rollback_readback`, inspect the recoverable object before deciding to patch or delete it.
 8. Stop and report if repeated waits would exceed the user's time budget or the server continues returning 429.
+
+For upload jobs, inspect the per-file state before retrying. Retry only failed
+items; never re-submit completed media objects. A completed item with
+`written_unverified` readback state requires a separate `get_object`, not a new
+upload. `manage_upload_job(action: "cancel")` preserves completed items and
+only aborts pending sessions.
 
 ## Concurrency and duplicate prevention
 

@@ -27,7 +27,12 @@ export type ApiCallStage =
   | "readback"
   | "rollback_delete"
   | "rollback_readback"
-  | "daily_note_enqueue";
+  | "daily_note_enqueue"
+  | "upload_init"
+  | "upload_part"
+  | "upload_complete"
+  | "upload_abort"
+  | "upload_readback";
 
 type ClientSession = {
   token: string;
@@ -287,7 +292,7 @@ CapacitiesApiError.fromResponse = async (response: Response) => {
   });
 };
 
-function resolveToken(apiToken?: string): string {
+export function resolveApiToken(apiToken?: string): string {
   const token = apiToken?.trim() || process.env.CAPACITIES_API_TOKEN?.trim();
 
   if (!token) {
@@ -534,7 +539,7 @@ export async function apiCall<T>(
 }
 
 export function getClient(apiToken?: string): CapacitiesClient {
-  const token = resolveToken(apiToken);
+  const token = resolveApiToken(apiToken);
   getMaxRateLimitRetries();
   getMaxRateLimitWaitMs();
   getReadbackMode();

@@ -20,6 +20,50 @@ export const objectIdSchema = z
   .uuid()
   .describe("Capacities object UUID.");
 
+export const uploadFileSchema = z
+  .object({
+    path: z
+      .string()
+      .min(1)
+      .describe(
+        "Absolute local file path readable by the MCP process. Relative paths, directories, and empty files are rejected.",
+      ),
+    title: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("Optional media object title. Defaults to the file name."),
+    fileType: z
+      .string()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe(
+        "Optional MIME type override. Omit it to let Capacities infer the media type from the file name.",
+      ),
+  })
+  .strict();
+
+export const uploadFilesSchema = z
+  .array(uploadFileSchema)
+  .min(1)
+  .max(100)
+  .describe("One or more local files to upload as Capacities media objects.");
+
+export const uploadModeSchema = z
+  .enum(["wait", "background"])
+  .optional()
+  .default("wait")
+  .describe(
+    "wait completes and verifies the upload in this call; background returns a jobId for later status/wait/cancel operations.",
+  );
+
+export const uploadJobIdSchema = z
+  .string()
+  .uuid()
+  .describe("Upload job UUID returned by upload_files in background mode.");
+
 export const structureSchema = z
   .string()
   .min(1)

@@ -1,6 +1,6 @@
 ---
 name: capacities-mcp-best-practice
-description: Operate Capacities safely and precisely through the Capacities MCP server. Use whenever a user asks to inspect, search, read, create, update, append to, or delete Capacities objects, pages, tasks, tags, web links, blocks, properties, collections, or Daily Notes; when choosing structured blocks versus Markdown; or when recovering from validation, partial-write, readback, or rate-limit errors.
+description: Operate Capacities safely and precisely through the Capacities MCP server. Use whenever a user asks to inspect, search, read, create, update, append to, delete, or upload Capacities objects, pages, tasks, tags, web links, media files, blocks, properties, collections, or Daily Notes; when choosing structured blocks versus Markdown; or when recovering from validation, partial-write, readback, upload-job, or rate-limit errors.
 ---
 
 # Capacities MCP Best Practices
