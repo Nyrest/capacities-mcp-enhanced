@@ -61,10 +61,10 @@ mcp_servers:
 
 ### Install the bundled skills (Optional)
 
-By installing the bundled Capacities MCP Best Practices skill, your agent can learn the full workflow, strict content schemas, safe mutation patterns, rate-limit recovery, and common pitfalls.
+By installing the Capacities MCP Best Practices skill, your agent can learn the full workflow, strict content schemas, safe mutation patterns, rate-limit recovery, and common pitfalls.
 
 ```bash
-npx skills add nyrest/capacities-mcp-best-practice
+npx skills add nyrest/capacities-mcp-v2
 ```
 
 ## 🧰 What agents can do

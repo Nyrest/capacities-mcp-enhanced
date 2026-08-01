@@ -31,8 +31,7 @@
     "xmcp"
   ],
   "files": [
-    "dist",
-    "skills"
+    "dist"
   ],
   "bin": {
     "capacities-mcp-v2": "dist/stdio.js"
