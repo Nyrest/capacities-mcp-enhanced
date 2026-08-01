@@ -1,6 +1,6 @@
 {
   "name": "capacities-mcp-enhanced",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Agent-oriented Capacities API 2.0 MCP server built with xmcp",
   "repository": {
     "type": "git",
