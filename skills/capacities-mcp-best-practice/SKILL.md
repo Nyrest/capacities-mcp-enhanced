@@ -75,7 +75,8 @@ If one task contains both prose and exact components, split it: write prose with
 
 ## Non-negotiable safety rules
 
-- Prefer the configured `CAPACITIES_API_TOKEN`. Pass `apiToken` only when the runtime requires it. Never reveal, log, or copy the token into content.
+- Prefer the configured `CAPACITIES_API_TOKEN`. It may contain a comma- or semicolon-separated API key pool. Keys in one pool must belong to the same space and have the same permissions; three or more keys are recommended. Keys are selected round-robin per endpoint, skipping keys currently marked rate-limited. Pass `apiToken` only when the runtime requires a per-call override. Never reveal, log, or copy any key into content.
+- `CAPACITIES_MCP_READBACK` accepts `true` or `false` and defaults to `true`. `false` disables ordinary mutation readback; rollback verification remains forced.
 - Use UUIDs from live responses. Do not fabricate IDs.
 - Inspect a structure before writing custom fields. Property display names are accepted only when unambiguous; property IDs are safer.
 - Never invent label values. Select from the live `labelOptions` catalog.
@@ -85,7 +86,7 @@ If one task contains both prose and exact components, split it: write prose with
 - Do not use Markdown for exact layout or style preservation.
 - Do not use Markdown output as an editable source of truth. It is a normalized view.
 - Do not infer success from an `isError: false` envelope alone. Inspect `verification` and `lossReport` when present.
-- Never blindly retry a create or append after an ambiguous failure. First determine `stage`, `writeState`, and whether a recoverable object ID exists.
+- Never blindly replay a create or append after an ambiguous failure. First determine `stage`, `writeState`, and whether a recoverable object ID exists. A 429 is automatically failed over to another available key for the same endpoint; it is returned only when the entire pool is rate-limited.
 - Serialize writes to the same object. Capacities does not provide optimistic locking through this MCP.
 - Default to soft deletion. Permanent deletion is irreversible and requires clear user intent.
 

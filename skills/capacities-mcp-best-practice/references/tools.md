@@ -14,7 +14,7 @@ Use this reference to select tools and construct top-level arguments. Tool names
 
 ## Common conventions
 
-All tools accept an optional `apiToken`. Prefer the server's configured `CAPACITIES_API_TOKEN`; never place a token in object content or expose it in an answer.
+All tools accept an optional `apiToken`. It may be one API key or a comma/semicolon-separated pool. Prefer the server's configured `CAPACITIES_API_TOKEN`; keys in one pool must belong to the same space and have the same permissions. Never place a key in object content or expose it in an answer.
 
 Important identifier rules:
 
@@ -296,7 +296,7 @@ The loss report is preflight-only because the operation is asynchronous. Capacit
 1. `inspect_space` for the structure.
 2. Resolve label options, entity targets, and collection IDs.
 3. Choose `create_object` for exact structure or `create_object_markdown` for prose.
-4. Inspect rollback/partial-failure details before any retry.
+4. Inspect rollback/partial-failure details before any manual replay.
 
 ### Recover an interrupted multi-stage create
 

@@ -9,7 +9,7 @@ Every call has two layers: MCP transport and the JSON envelope. Every synchronou
 - [Stable error categories](#stable-error-categories)
 - [Recovery by error type](#recovery-by-error-type)
 - [Rate-limit behavior](#rate-limit-behavior)
-- [Retry decision procedure](#retry-decision-procedure)
+- [Rate-limit response procedure](#rate-limit-response-procedure)
 - [Concurrency and duplicate prevention](#concurrency-and-duplicate-prevention)
 
 ## Unified envelopes
@@ -85,7 +85,7 @@ Status meanings:
 
 Possible mismatch codes include property/collection mismatch, missing or still-present blocks, block type/content mismatch, child-ID mismatch, object still present after deletion, or no new block after append. Compare the reported `path` and message with user intent.
 
-The server operator can set `CAPACITIES_MCP_READBACK=off` to remove normal mutation readback overhead. Agents cannot assume it is on. Rollback verification for transactional Markdown create remains forced for safety.
+The server operator can set `CAPACITIES_MCP_READBACK=false` to remove normal mutation readback overhead. It defaults to `true`; agents cannot assume it is enabled. Rollback verification for transactional Markdown create remains forced for safety.
 
 ## Stable error categories
 
@@ -154,18 +154,18 @@ The mutation itself must not be replayed automatically. A repeated create/append
 
 ## Rate-limit behavior
 
-The MCP retries only an individual SDK request that fails with `cap_rate_limit_exceeded`. It does not replay an entire multi-stage tool.
+`CAPACITIES_API_TOKEN` accepts one API key or a comma/semicolon-separated pool.
+The pool uses round-robin selection independently for each endpoint and skips
+keys currently marked as rate-limited. When a request receives
+`cap_rate_limit_exceeded`, it immediately fails over to another available key
+for the same endpoint. The error is returned only when every key in that pool is
+rate-limited. The server does not sleep, use exponential backoff, or replay
+across pools.
 
-Server configuration:
-
-| Environment variable | Default | Behavior |
-|---|---:|---|
-| `CAPACITIES_MCP_MAX_RATE_LIMIT_RETRIES` | `1` | Maximum per-request retries. `0` disables retries. |
-| `CAPACITIES_MCP_MAX_RATE_LIMIT_WAIT_MS` | `30000` | Maximum allowed single wait in milliseconds. `0` disables waiting. |
-
-Both variables require non-negative safe integers. Invalid, negative, fractional, or nonnumeric values produce `mcp_configuration_error`.
-
-Wait calculation uses the greater of upstream retry/reset guidance and exponential backoff, plus up to 250 ms jitter. If the required delay exceeds the configured wait cap, the MCP returns the rate-limit error instead of waiting.
+All keys in one pool must belong to the same space and have the same
+permissions. Three or more keys are recommended. Multiple spaces require
+separate MCP server instances. The same pool syntax is accepted by the
+per-call `apiToken` option.
 
 Rate-limit error details can include:
 
@@ -173,34 +173,26 @@ Rate-limit error details can include:
 {
   "retryAfter": 12,
   "resetAt": "2026-08-01T08:00:12.000Z",
-  "attempts": 2,
-  "maxRetries": 1,
-  "totalWaitMs": 12207,
-  "maxWaitMs": 30000,
   "stage": "readback",
-  "retryHistory": [],
-  "retrySuppressed": false,
   "rateLimitMetadataAvailable": true
 }
 ```
 
-If metadata is unavailable, `retryAfter` and `resetAt` may be `null`. Never hammer the server with immediate repeated calls.
+If metadata is unavailable, `retryAfter` and `resetAt` may be `null`. Do not
+issue speculative bursts after a fully exhausted pool.
 
-## Retry decision procedure
+## Rate-limit response procedure
 
 When `cap_rate_limit_exceeded` escapes the MCP:
 
-1. Inspect `stage`, `attempts`, `retryAfter`, `resetAt`, `retrySuppressed`, and `writeState` if supplied.
-2. Wait until `resetAt`, or for `retryAfter` seconds, adding a small safety margin. If neither exists, use conservative exponential backoff.
-3. For a read-only call, retry the same call after the wait.
-4. For `stage: "mutation"` or an ambiguous network outcome, inspect the target before retrying.
-5. For create/append, search or get using any returned object ID; do not duplicate an already completed stage.
-6. For `stage: "readback"`, re-run only `get_object`, not the mutation.
-7. For `stage: "rollback_delete"` or `rollback_readback`, inspect the recoverable object before deciding to patch or delete it.
-8. Stop and report if repeated waits would exceed the user's time budget or the server continues returning 429.
+1. Inspect `stage`, `retryAfter`, `resetAt`, and `writeState` if supplied.
+2. Report that the configured pool is fully rate-limited for this endpoint.
+3. For a mutation or ambiguous write outcome, inspect the target before any later manual replay.
+4. For `stage: "readback"`, re-run only `get_object`, not the mutation.
+5. For `stage: "rollback_delete"` or `rollback_readback`, inspect the recoverable object before deciding to patch or delete it.
 
-For upload jobs, inspect the per-file state before retrying. Retry only failed
-items; never re-submit completed media objects. A completed item with
+For upload jobs, inspect the per-file state before any manual replay. Never
+re-submit completed media objects. A completed item with
 `written_unverified` readback state requires a separate `get_object`, not a new
 upload. `manage_upload_job(action: "cancel")` preserves completed items and
 only aborts pending sessions.
@@ -214,4 +206,4 @@ This MCP provides concurrency-safe object operations with a per-object reader/wr
 - Before replacing multi-valued fields, merge desired changes with the current list explicitly.
 - Before updating a parent block, decide whether child arrays should be preserved or replaced.
 - Use idempotent reads freely, but avoid speculative writes.
-- If cancellation or transport failure occurs during a write, inspect current state before any retry.
+- If cancellation or transport failure occurs during a write, inspect current state before any manual replay.
