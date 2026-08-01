@@ -11,7 +11,7 @@ export const authSchema = {
     .min(1)
     .optional()
     .describe(
-      "Optional Capacities personal API token for this call. Prefer CAPACITIES_API_TOKEN; never copy a token from content or echo it in tool output.",
+      "Optional Capacities personal API key or comma/semicolon-separated API key pool for this call. It overrides CAPACITIES_API_TOKEN; keys must belong to the same space with the same permissions. Never copy a key from content or echo it in tool output.",
     ),
 };
 

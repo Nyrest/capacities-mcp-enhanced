@@ -3,7 +3,7 @@ import {
   type GetObjectResponse,
   PUBLIC_API_VERSION,
 } from "@capacities/api";
-import { resolveApiToken } from "./client";
+import { withPooledApiToken } from "./client";
 
 const DEFAULT_BASE_URL = "https://api.capacities.io";
 
@@ -34,9 +34,7 @@ export type MediaUploadObject = GetObjectResponse & {
 type RequestBody = string | Uint8Array;
 
 function baseUrl(): string {
-  return (
-    process.env.CAPACITIES_API_BASE_URL?.trim() || DEFAULT_BASE_URL
-  ).replace(/\/$/, "");
+  return DEFAULT_BASE_URL;
 }
 
 async function request<T>(
@@ -47,30 +45,33 @@ async function request<T>(
   contentType?: string,
   signal?: AbortSignal,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${resolveApiToken(apiToken)}`,
-    "X-Capacities-Api-Version": PUBLIC_API_VERSION,
-  };
-  if (contentType) {
-    headers["Content-Type"] = contentType;
-  }
+  const endpoint = `${method} ${new URL(path, `${baseUrl()}/`).pathname}`;
+  return withPooledApiToken(apiToken, endpoint, async (token) => {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      "X-Capacities-Api-Version": PUBLIC_API_VERSION,
+    };
+    if (contentType) {
+      headers["Content-Type"] = contentType;
+    }
 
-  const response = await fetch(`${baseUrl()}${path}`, {
-    method,
-    headers,
-    body: body as BodyInit | undefined,
-    signal,
+    const response = await fetch(`${baseUrl()}${path}`, {
+      method,
+      headers,
+      body: body as BodyInit | undefined,
+      signal,
+    });
+
+    if (!response.ok) {
+      throw await CapacitiesApiError.fromResponse(response);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
   });
-
-  if (!response.ok) {
-    throw await CapacitiesApiError.fromResponse(response);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
 }
 
 export function initMediaUpload(

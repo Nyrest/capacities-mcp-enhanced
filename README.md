@@ -11,7 +11,7 @@ Capacities MCP brings rich, read-write access to your knowledge base through one
 - **Two first-class authoring engines** — fast Markdown writing and precise structured blocks in one server.
 - **Full CRUD with Capacities API 2.0** — objects, custom properties, collections, blocks, web links, tasks, tags, and Daily Notes.
 - **Designed for autonomous agents** — live schema discovery, consistent responses, focused tools, and clear recovery information.
-- **Safer writes** — independent readback verification, soft deletion by default, scoped rate-limit retries, and rollback for failed multi-stage Markdown creates.
+- **Safer writes** — independent readback verification, soft deletion by default, API-key rate-limit failover, and rollback for failed multi-stage Markdown creates.
 - **Concurrency-safe object operations** — same-object reads can run concurrently, while writes use an exclusive lock and automatically wait for active reads or other writes; different objects proceed concurrently.
 - **Faithful rich content** — headings, nested blocks, grids, toggles, tasks, links, entity references, colors, code, and math.
 - **Agent-friendly media uploads** — stream one or many local files, report progress, verify media objects, and manage long-running jobs without exposing multipart internals.
@@ -22,13 +22,14 @@ Capacities MCP brings rich, read-write access to your knowledge base through one
 ### Requirements
 
 - Node.js 20+ or Bun 1.3+
-- A personal token from the new Capacities API with the permissions you need
+- One or more personal API keys from the new Capacities API with the permissions you need
 
 ### Installation
 
 Configure your MCP client to use the Capacities MCP server:
 
-Generate a token in **Capacities → Settings → Capacities API → Generate new token**. New API tokens begin with `cap-api-`.
+Generate a token in **Capacities → Settings → Capacities API → Generate new token**. New API tokens begin with `cap-api-`.  
+Configuring at least 3 tokens with same space and permissions is recommended to avoid rate-limit errors.
 
 #### Claude Code
 
@@ -39,7 +40,7 @@ Generate a token in **Capacities → Settings → Capacities API → Generate ne
       "command": "npx",
       "args": ["--yes", "capacities-mcp-enhanced@latest"],
       "env": {
-        "CAPACITIES_API_TOKEN": "cap-api-your-token"
+        "CAPACITIES_API_TOKEN": "cap-api-key-1,cap-api-key-2;cap-api-key-3"
       }
     }
   }
@@ -56,7 +57,7 @@ mcp_servers:
       - "--yes"
       - "capacities-mcp-enhanced@latest"
     env:
-      CAPACITIES_API_TOKEN: "cap-api-your-token"
+      CAPACITIES_API_TOKEN: "cap-api-key-1,cap-api-key-2;cap-api-key-3"
     supports_parallel_tool_calls: true
 ```
 
@@ -92,18 +93,33 @@ npx skills add nyrest/capacities-mcp-enhanced
 
 `upload_files` accepts absolute local file paths only; relative paths, directories, and empty files are rejected. Background upload jobs live only in the current MCP process and retain terminal status for a limited time.
 
-## ⚙️ Optional controls
+### Supported environment variables and configuration options
 
-```text
-CAPACITIES_MCP_MAX_RATE_LIMIT_RETRIES=1
-CAPACITIES_MCP_MAX_RATE_LIMIT_WAIT_MS=30000
-CAPACITIES_MCP_READBACK=on
-```
+| Setting | Required | Default | Description |
+| --- | --- | --- | --- |
+| `CAPACITIES_API_TOKEN` | Yes, unless every call supplies `apiToken` | — | One API key or a comma/semicolon-separated key pool. The keys must belong to the same space and use the same permissions. |
+| `CAPACITIES_MCP_READBACK` | No | `true` | Set to `false` to disable ordinary mutation readback. Rollback verification remains enabled. Accepted values: `true`, `false`. |
 
-Set either rate-limit value to `0` to disable automatic retry waiting. Set `CAPACITIES_MCP_READBACK=off` to disable ordinary mutation readback when minimizing API usage is more important than immediate verification.
+Per-call configuration is exposed through the optional `apiToken` argument on
+all tools. It overrides `CAPACITIES_API_TOKEN` for that call and accepts the
+same key-pool syntax.
 
+### ⚙️ API key pool and rate limits
 
-`upload_files` accepts absolute local file paths only; relative paths, directories, and empty files are rejected. Background upload jobs live only in the current MCP process and retain terminal status for a limited time.
+`CAPACITIES_API_TOKEN` and the per-call `apiToken` option accept multiple API
+keys separated by `,` or `;`.
+Keys are selected with round-robin scheduling independently for each endpoint,
+skipping keys currently marked as rate-limited.
+
+All keys in one pool must belong to the same space and have the same
+permissions. At least 3 keys are recommended; use separate MCP server
+instances for multiple spaces.
+
+On `429`, the pool immediately fails over to another key that is not rate
+limited. The error is returned only when all keys are rate limited. No waiting,
+exponential backoff, or cross-pool retry is performed.
+
+### 🚅 Concurrency and safe writes
 
 Reads for the same object can run concurrently. A mutation obtains an exclusive
 object lock, so it waits for active reads and other writes; reads arriving

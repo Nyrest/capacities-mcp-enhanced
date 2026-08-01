@@ -1,14 +1,11 @@
 import {
   CapacitiesApiError,
   CapacitiesClient,
+  CapacitiesErrorCode,
   type SpaceStructure,
 } from "@capacities/api";
 
 const STRUCTURE_CACHE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_MAX_RATE_LIMIT_RETRIES = 1;
-const DEFAULT_MAX_RATE_LIMIT_WAIT_MS = 30_000;
-const RATE_LIMIT_RETRY_ENV = "CAPACITIES_MCP_MAX_RATE_LIMIT_RETRIES";
-const RATE_LIMIT_WAIT_ENV = "CAPACITIES_MCP_MAX_RATE_LIMIT_WAIT_MS";
 const READBACK_ENV = "CAPACITIES_MCP_READBACK";
 
 export type ToolError = {
@@ -17,7 +14,7 @@ export type ToolError = {
   details?: unknown;
 };
 
-export type ReadbackMode = "on" | "off";
+export type ReadbackMode = boolean;
 
 export type ApiCallStage =
   | "unknown"
@@ -35,7 +32,8 @@ export type ApiCallStage =
   | "upload_readback";
 
 type ClientSession = {
-  token: string;
+  poolKey: string;
+  pool: TokenPool;
   client: CapacitiesClient;
   structures?: SpaceStructure[];
   structuresFetchedAt?: number;
@@ -43,9 +41,19 @@ type ClientSession = {
 
 type ApiCallOptions = {
   signal?: AbortSignal;
-  random?: () => number;
-  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   stage?: ApiCallStage;
+};
+
+type TokenState = {
+  token: string;
+  blockedUntilByEndpoint: Map<string, number>;
+};
+
+type TokenPool = {
+  key: string;
+  tokens: TokenState[];
+  clients: Map<string, CapacitiesClient>;
+  cursors: Map<string, number>;
 };
 
 export class McpToolError extends Error {
@@ -60,7 +68,9 @@ export class McpToolError extends Error {
   }
 }
 
-let session: ClientSession | undefined;
+const pools = new Map<string, TokenPool>();
+const sessions = new Map<string, ClientSession>();
+const sessionByClient = new WeakMap<CapacitiesClient, ClientSession>();
 type ObjectLockState = {
   activeReaders: number;
   writerActive: boolean;
@@ -292,105 +302,58 @@ CapacitiesApiError.fromResponse = async (response: Response) => {
   });
 };
 
-export function resolveApiToken(apiToken?: string): string {
-  const token = apiToken?.trim() || process.env.CAPACITIES_API_TOKEN?.trim();
+export function resolveApiTokens(apiToken?: string): string[] {
+  const configured =
+    apiToken?.trim() || process.env.CAPACITIES_API_TOKEN?.trim();
 
-  if (!token) {
+  if (!configured) {
     throw new McpToolError(
       "mcp_configuration_error",
       "Capacities authentication is missing. Set CAPACITIES_API_TOKEN or pass apiToken to the tool.",
     );
   }
 
-  return token;
+  const tokens = configured
+    .split(/[;,]/)
+    .map((token) => token.trim())
+    .filter(
+      (token, index, all) => token.length > 0 && all.indexOf(token) === index,
+    );
+
+  if (tokens.length === 0) {
+    throw new McpToolError(
+      "mcp_configuration_error",
+      "Capacities authentication must contain at least one non-empty API key.",
+    );
+  }
+
+  return tokens;
 }
 
-export function getMaxRateLimitRetries(
-  value = process.env[RATE_LIMIT_RETRY_ENV],
-): number {
-  if (value === undefined || value.trim() === "") {
-    return DEFAULT_MAX_RATE_LIMIT_RETRIES;
-  }
-  if (!/^\d+$/.test(value.trim())) {
-    throw new McpToolError(
-      "mcp_configuration_error",
-      `${RATE_LIMIT_RETRY_ENV} must be a non-negative integer.`,
-      { environmentVariable: RATE_LIMIT_RETRY_ENV, value },
-    );
-  }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new McpToolError(
-      "mcp_configuration_error",
-      `${RATE_LIMIT_RETRY_ENV} must be a non-negative safe integer.`,
-      { environmentVariable: RATE_LIMIT_RETRY_ENV, value },
-    );
-  }
-  return parsed;
-}
-
-export function getMaxRateLimitWaitMs(
-  value = process.env[RATE_LIMIT_WAIT_ENV],
-): number {
-  if (value === undefined || value.trim() === "") {
-    return DEFAULT_MAX_RATE_LIMIT_WAIT_MS;
-  }
-  if (!/^\d+$/.test(value.trim())) {
-    throw new McpToolError(
-      "mcp_configuration_error",
-      `${RATE_LIMIT_WAIT_ENV} must be a non-negative integer in milliseconds.`,
-      { environmentVariable: RATE_LIMIT_WAIT_ENV, value },
-    );
-  }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new McpToolError(
-      "mcp_configuration_error",
-      `${RATE_LIMIT_WAIT_ENV} must be a non-negative safe integer in milliseconds.`,
-      { environmentVariable: RATE_LIMIT_WAIT_ENV, value },
-    );
-  }
-  return parsed;
+export function resolveApiToken(apiToken?: string): string {
+  return resolveApiTokens(apiToken)[0];
 }
 
 export function getReadbackMode(
   value = process.env[READBACK_ENV],
 ): ReadbackMode {
   if (value === undefined || value.trim() === "") {
-    return "on";
+    return true;
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === "on") {
-    return "on";
+  if (normalized === "true") {
+    return true;
   }
-  if (normalized === "off") {
-    return "off";
+  if (normalized === "false") {
+    return false;
   }
 
   throw new McpToolError(
     "mcp_configuration_error",
-    `${READBACK_ENV} must be either "on" or "off".`,
+    `${READBACK_ENV} must be either "true" or "false".`,
     { environmentVariable: READBACK_ENV, value },
   );
-}
-
-function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(signal.reason ?? new Error("Operation aborted."));
-  }
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        reject(signal.reason ?? new Error("Operation aborted."));
-      },
-      { once: true },
-    );
-  });
 }
 
 function rateLimitDetails(error: CapacitiesApiError): Record<string, unknown> {
@@ -411,147 +374,240 @@ function withStage(
   });
 }
 
-function withAttemptDetails(
-  error: CapacitiesApiError,
-  attempts: number,
-  maxRetries: number,
-  totalWaitMs: number,
-  maxWaitMs: number,
-  stage: ApiCallStage,
-  retryHistory: Array<Record<string, unknown>>,
-  retrySuppressed = false,
-  suppressionReason?: string,
-): CapacitiesApiError {
-  const details = rateLimitDetails(error);
-  return new CapacitiesApiError(error.status, error.code, error.message, {
-    ...details,
-    attempts,
-    maxRetries,
-    totalWaitMs,
-    maxWaitMs,
-    stage,
-    retryHistory,
-    retrySuppressed,
-    ...(suppressionReason === undefined ? {} : { suppressionReason }),
-    retryAfter:
-      typeof details.retryAfter === "number" ? details.retryAfter : null,
-    resetAt: typeof details.resetAt === "string" ? details.resetAt : null,
-    limit: typeof details.limit === "number" ? details.limit : null,
-    remaining: typeof details.remaining === "number" ? details.remaining : null,
-    rateLimitMetadataAvailable: details.rateLimitMetadataAvailable === true,
-    rateLimitSource:
-      details.rateLimitSource === "ratelimit" ||
-      details.rateLimitSource === "retry-after"
-        ? details.rateLimitSource
-        : "none",
-  });
-}
-
 export async function apiCall<T>(
   operation: () => Promise<T>,
   options: ApiCallOptions = {},
 ): Promise<T> {
-  const maxRetries = getMaxRateLimitRetries();
-  const maxWaitMs = getMaxRateLimitWaitMs();
-  const sleep = options.sleep ?? wait;
-  const random = options.random ?? Math.random;
-  const stage = options.stage ?? "unknown";
-  let attempts = 0;
-  let totalWaitMs = 0;
-  const retryHistory: Array<Record<string, unknown>> = [];
-
-  while (true) {
-    attempts += 1;
-    try {
-      return await operation();
-    } catch (error) {
-      if (!(error instanceof CapacitiesApiError)) {
-        throw error;
-      }
-
-      if (error.status !== 429 || error.code !== "cap_rate_limit_exceeded") {
-        throw stage === "unknown" ? error : withStage(error, stage);
-      }
-
-      const retriesPerformed = attempts - 1;
-      if (retriesPerformed >= maxRetries) {
-        throw withAttemptDetails(
-          error,
-          attempts,
-          maxRetries,
-          totalWaitMs,
-          maxWaitMs,
-          stage,
-          [
-            ...retryHistory,
-            {
-              attempt: attempts,
-              retried: false,
-              reason: "max_retries_exhausted",
-            },
-          ],
-        );
-      }
-
-      const details = rateLimitDetails(error);
-      const retryAfter =
-        typeof details.retryAfter === "number"
-          ? Math.max(0, details.retryAfter)
-          : 0;
-      const exponentialBackoff = 500 * 2 ** retriesPerformed;
-      const delay =
-        Math.max(retryAfter * 1000, exponentialBackoff) +
-        Math.floor(random() * 251);
-
-      const retryRecord = {
-        attempt: attempts,
-        retryAfter,
-        resetAt: typeof details.resetAt === "string" ? details.resetAt : null,
-        requestedWaitMs: delay,
-      };
-
-      if (maxWaitMs === 0 || delay > maxWaitMs) {
-        throw withAttemptDetails(
-          error,
-          attempts,
-          maxRetries,
-          totalWaitMs,
-          maxWaitMs,
-          stage,
-          [
-            ...retryHistory,
-            {
-              ...retryRecord,
-              retried: false,
-              reason: maxWaitMs === 0 ? "wait_disabled" : "wait_cap_exceeded",
-            },
-          ],
-          true,
-          maxWaitMs === 0 ? "wait_disabled" : "wait_cap_exceeded",
-        );
-      }
-
-      retryHistory.push({ ...retryRecord, retried: true });
-      totalWaitMs += delay;
-      await sleep(delay, options.signal);
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof CapacitiesApiError && options.stage !== undefined) {
+      throw withStage(error, options.stage);
     }
+    throw error;
   }
 }
 
 export function getClient(apiToken?: string): CapacitiesClient {
-  const token = resolveApiToken(apiToken);
-  getMaxRateLimitRetries();
-  getMaxRateLimitWaitMs();
+  const tokens = resolveApiTokens(apiToken);
   getReadbackMode();
 
-  if (!session || session.token !== token) {
-    session = {
-      token,
-      client: new CapacitiesClient({ apiToken: token }),
+  const poolKey = tokens.join("\u0000");
+  let session = sessions.get(poolKey);
+  if (!session) {
+    const pool: TokenPool = {
+      key: poolKey,
+      tokens: tokens.map((token) => ({
+        token,
+        blockedUntilByEndpoint: new Map(),
+      })),
+      clients: new Map(),
+      cursors: new Map(),
     };
+    pools.set(poolKey, pool);
+    const client = createPooledClient(pool);
+    session = { poolKey, pool, client };
+    sessions.set(poolKey, session);
+    sessionByClient.set(client, session);
   }
 
   return session.client;
+}
+
+function isRateLimited(error: unknown): error is CapacitiesApiError {
+  return (
+    error instanceof CapacitiesApiError &&
+    error.status === 429 &&
+    error.code === "cap_rate_limit_exceeded"
+  );
+}
+
+function chooseToken(pool: TokenPool, endpoint: string): TokenState {
+  const now = Date.now();
+  const start = pool.cursors.get(endpoint) ?? 0;
+  for (let offset = 0; offset < pool.tokens.length; offset += 1) {
+    const index = (start + offset) % pool.tokens.length;
+    const token = pool.tokens[index];
+    const blockedUntil = token.blockedUntilByEndpoint.get(endpoint) ?? 0;
+    if (blockedUntil <= now) {
+      pool.cursors.set(endpoint, (index + 1) % pool.tokens.length);
+      return token;
+    }
+  }
+
+  const earliest = pool.tokens.reduce((candidate, token) => {
+    const candidateUntil = candidate.blockedUntilByEndpoint.get(endpoint) ?? 0;
+    const tokenUntil = token.blockedUntilByEndpoint.get(endpoint) ?? 0;
+    return tokenUntil < candidateUntil ? token : candidate;
+  }, pool.tokens[0]);
+  const retryAfter = Math.max(
+    0,
+    Math.ceil(
+      ((earliest.blockedUntilByEndpoint.get(endpoint) ?? now) - now) / 1000,
+    ),
+  );
+  throw new CapacitiesApiError(
+    429,
+    CapacitiesErrorCode.RateLimitExceeded,
+    "All configured API keys are rate-limited for this endpoint.",
+    {
+      retryAfter,
+      resetAt: new Date(now + retryAfter * 1000).toISOString(),
+      rateLimitMetadataAvailable: true,
+      rateLimitSource: "api-key-pool",
+      endpoint,
+    },
+  );
+}
+
+function markRateLimited(
+  token: TokenState,
+  endpoint: string,
+  error: CapacitiesApiError,
+): void {
+  const details = rateLimitDetails(error);
+  const retryAfter =
+    typeof details.retryAfter === "number"
+      ? Math.max(0, details.retryAfter)
+      : 0;
+  token.blockedUntilByEndpoint.set(endpoint, Date.now() + retryAfter * 1000);
+}
+
+export async function withPooledApiToken<T>(
+  apiToken: string | undefined,
+  endpoint: string,
+  operation: (token: string) => Promise<T>,
+): Promise<T> {
+  const tokens = resolveApiTokens(apiToken);
+  const poolKey = tokens.join("\u0000");
+  let pool = pools.get(poolKey);
+  if (!pool) {
+    pool = {
+      key: poolKey,
+      tokens: tokens.map((token) => ({
+        token,
+        blockedUntilByEndpoint: new Map(),
+      })),
+      clients: new Map(),
+      cursors: new Map(),
+    };
+    pools.set(poolKey, pool);
+  }
+
+  let lastRateLimit: CapacitiesApiError | undefined;
+  while (true) {
+    let selected: TokenState;
+    try {
+      selected = chooseToken(pool, endpoint);
+    } catch (error) {
+      if (lastRateLimit !== undefined) {
+        throw lastRateLimit;
+      }
+      throw error;
+    }
+
+    try {
+      return await operation(selected.token);
+    } catch (error) {
+      if (!isRateLimited(error)) {
+        throw error;
+      }
+      markRateLimited(selected, endpoint, error);
+      lastRateLimit = error;
+    }
+  }
+}
+
+function pooledSdkCall<T>(
+  pool: TokenPool,
+  endpoint: string,
+  operation: (client: CapacitiesClient) => Promise<T>,
+): Promise<T> {
+  return withPooledApiToken(
+    pool.tokens.map((entry) => entry.token).join(","),
+    endpoint,
+    async (token) => {
+      let client = pool.clients.get(token);
+      if (!client) {
+        client = new CapacitiesClient({ apiToken: token });
+        pool.clients.set(token, client);
+      }
+      return operation(client);
+    },
+  );
+}
+
+function createPooledClient(pool: TokenPool): CapacitiesClient {
+  return {
+    space: {
+      get: () =>
+        pooledSdkCall(pool, "GET /space", (client) => client.space.get()),
+      structures: () =>
+        pooledSdkCall(pool, "GET /space/structures", (client) =>
+          client.space.structures(),
+        ),
+    },
+    object: {
+      get: (params) =>
+        pooledSdkCall(pool, "GET /object", (client) =>
+          client.object.get(params),
+        ),
+      create: (body) =>
+        pooledSdkCall(pool, "POST /object", (client) =>
+          client.object.create(body),
+        ),
+      update: (body) =>
+        pooledSdkCall(pool, "PATCH /object", (client) =>
+          client.object.update(body),
+        ),
+      delete: (params) =>
+        pooledSdkCall(pool, "DELETE /object", (client) =>
+          client.object.delete(params),
+        ),
+      createFromUrl: (body) =>
+        pooledSdkCall(pool, "POST /object/url", (client) =>
+          client.object.createFromUrl(body),
+        ),
+      markdown: {
+        get: (params) =>
+          pooledSdkCall(pool, "GET /object/markdown", (client) =>
+            client.object.markdown.get(params),
+          ),
+        create: (body) =>
+          pooledSdkCall(pool, "POST /object/markdown", (client) =>
+            client.object.markdown.create(body),
+          ),
+      },
+    },
+    objects: {
+      search: (body) =>
+        pooledSdkCall(pool, "POST /objects/search", (client) =>
+          client.objects.search(body),
+        ),
+    },
+    blocks: {
+      dailyNote: {
+        append: (body) =>
+          pooledSdkCall(pool, "POST /blocks/daily-note/append", (client) =>
+            client.blocks.dailyNote.append(body),
+          ),
+      },
+      append: (body) =>
+        pooledSdkCall(pool, "POST /blocks/append", (client) =>
+          client.blocks.append(body),
+        ),
+      block: {
+        delete: (params) =>
+          pooledSdkCall(pool, "DELETE /block", (client) =>
+            client.blocks.block.delete(params),
+          ),
+        update: (body) =>
+          pooledSdkCall(pool, "PATCH /blocks/block", (client) =>
+            client.blocks.block.update(body),
+          ),
+      },
+    },
+  } as CapacitiesClient;
 }
 
 export async function getStructures(
@@ -560,8 +616,9 @@ export async function getStructures(
   signal?: AbortSignal,
 ): Promise<SpaceStructure[]> {
   const now = Date.now();
+  const session = sessionByClient.get(client);
   const cacheIsFresh =
-    session?.client === client &&
+    session !== undefined &&
     session.structures !== undefined &&
     session.structuresFetchedAt !== undefined &&
     now - session.structuresFetchedAt < STRUCTURE_CACHE_TTL_MS;
@@ -578,7 +635,7 @@ export async function getStructures(
     stage: "discovery",
   });
 
-  if (session?.client === client) {
+  if (session !== undefined) {
     session.structures = structures;
     session.structuresFetchedAt = now;
   }

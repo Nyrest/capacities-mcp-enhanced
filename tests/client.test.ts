@@ -4,35 +4,22 @@ import {
   apiCall,
   errorResult,
   formatError,
-  getMaxRateLimitRetries,
-  getMaxRateLimitWaitMs,
+  getClient,
   getReadbackMode,
   McpToolError,
   normalizeError,
   parseRateLimitHeader,
+  resolveApiTokens,
   toolResult,
   withObjectMutationLock,
   withObjectReadLock,
+  withPooledApiToken,
 } from "../src/lib/client";
 
-const retryEnv = "CAPACITIES_MCP_MAX_RATE_LIMIT_RETRIES";
-const originalRetryValue = process.env[retryEnv];
-const waitEnv = "CAPACITIES_MCP_MAX_RATE_LIMIT_WAIT_MS";
-const originalWaitValue = process.env[waitEnv];
 const readbackEnv = "CAPACITIES_MCP_READBACK";
 const originalReadbackValue = process.env[readbackEnv];
 
 afterEach(() => {
-  if (originalRetryValue === undefined) {
-    delete process.env[retryEnv];
-  } else {
-    process.env[retryEnv] = originalRetryValue;
-  }
-  if (originalWaitValue === undefined) {
-    delete process.env[waitEnv];
-  } else {
-    process.env[waitEnv] = originalWaitValue;
-  }
   if (originalReadbackValue === undefined) {
     delete process.env[readbackEnv];
   } else {
@@ -98,7 +85,7 @@ describe("unified tool response envelope", () => {
   });
 });
 
-describe("RateLimit metadata and retry configuration", () => {
+describe("RateLimit metadata and API key pool configuration", () => {
   test("parses reset into retryAfter and an absolute resetAt", () => {
     expect(
       parseRateLimitHeader(
@@ -141,29 +128,25 @@ describe("RateLimit metadata and retry configuration", () => {
     expect(Date.parse(details.resetAt)).toBeLessThanOrEqual(after + 2_000);
   });
 
-  test("accepts default, zero, and positive retry counts", () => {
-    expect(getMaxRateLimitRetries(undefined)).toBe(1);
-    expect(getMaxRateLimitRetries("0")).toBe(0);
-    expect(getMaxRateLimitRetries("3")).toBe(3);
+  test("parses comma and semicolon separated API keys", () => {
+    expect(resolveApiTokens(" key-a,key-b; key-a ")).toEqual([
+      "key-a",
+      "key-b",
+    ]);
   });
 
-  test("accepts and validates the maximum automatic wait", () => {
-    expect(getMaxRateLimitWaitMs(undefined)).toBe(30_000);
-    expect(getMaxRateLimitWaitMs("0")).toBe(0);
-    expect(getMaxRateLimitWaitMs("1250")).toBe(1250);
-    for (const value of ["-1", "1.5", "no"]) {
-      expect(() => getMaxRateLimitWaitMs(value)).toThrow(
-        "must be a non-negative integer in milliseconds",
-      );
-    }
+  test("rejects an empty API key pool", () => {
+    expect(() => resolveApiTokens(" ; , ")).toThrow(
+      "at least one non-empty API key",
+    );
   });
 
-  test("accepts on/off readback configuration and rejects other values", () => {
-    expect(getReadbackMode(undefined)).toBe("on");
-    expect(getReadbackMode("on")).toBe("on");
-    expect(getReadbackMode("OFF")).toBe("off");
-    expect(() => getReadbackMode("false")).toThrow(
-      'must be either "on" or "off"',
+  test("accepts true/false readback configuration and rejects other values", () => {
+    expect(getReadbackMode(undefined)).toBe(true);
+    expect(getReadbackMode("true")).toBe(true);
+    expect(getReadbackMode("FALSE")).toBe(false);
+    expect(() => getReadbackMode("on")).toThrow(
+      'must be either "true" or "false"',
     );
   });
 
@@ -180,226 +163,101 @@ describe("RateLimit metadata and retry configuration", () => {
     });
   });
 
-  test("rejects negative, decimal, and non-numeric values", () => {
-    for (const value of ["-1", "1.5", "no"]) {
-      expect(() => getMaxRateLimitRetries(value)).toThrow(
-        "must be a non-negative integer",
-      );
-    }
-  });
-
-  test("rejects invalid retry configuration before making an API call", async () => {
-    process.env[retryEnv] = "1.5";
+  test("returns a rate-limit error without invoking the operation again", async () => {
     let attempts = 0;
-
-    try {
-      await apiCall(async () => {
-        attempts += 1;
-        return "unexpected";
-      });
-    } catch (error) {
-      expect(error).toBeInstanceOf(McpToolError);
-      expect((error as McpToolError).code).toBe("mcp_configuration_error");
-    }
-
-    expect(attempts).toBe(0);
-  });
-
-  test("retries only the individual operation that returned 429", async () => {
-    process.env[retryEnv] = "1";
-    let attempts = 0;
-    const delays: number[] = [];
-
-    const result = await apiCall(
-      async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          throw new CapacitiesApiError(
-            429,
-            "cap_rate_limit_exceeded",
-            "Wait.",
-            { retryAfter: 2, resetAt: "2026-07-31T00:00:02.000Z" },
-          );
-        }
-        return "created-once";
-      },
-      {
-        random: () => 0,
-        sleep: async (milliseconds) => {
-          delays.push(milliseconds);
-        },
-        stage: "mutation",
-      },
+    const error = new CapacitiesApiError(
+      429,
+      "cap_rate_limit_exceeded",
+      "Wait.",
+      { retryAfter: 10 },
     );
-
-    expect(result).toBe("created-once");
-    expect(attempts).toBe(2);
-    expect(delays).toEqual([2_000]);
-  });
-
-  test("suppresses a retry when the computed wait exceeds the cap", async () => {
-    process.env[retryEnv] = "1";
-    process.env[waitEnv] = "100";
-    let attempts = 0;
-    let sleeps = 0;
-
-    try {
-      await apiCall(
-        async () => {
-          attempts += 1;
-          throw new CapacitiesApiError(
-            429,
-            "cap_rate_limit_exceeded",
-            "Wait.",
-            { retryAfter: 1 },
-          );
-        },
-        {
-          random: () => 0,
-          sleep: async () => {
-            sleeps += 1;
-          },
-          stage: "readback",
-        },
-      );
-      throw new Error("apiCall should have failed");
-    } catch (error) {
-      expect(error).toBeInstanceOf(CapacitiesApiError);
-      expect((error as CapacitiesApiError).details).toMatchObject({
-        stage: "readback",
-        maxWaitMs: 100,
-        retrySuppressed: true,
-        suppressionReason: "wait_cap_exceeded",
-        retryHistory: [
-          {
-            attempt: 1,
-            requestedWaitMs: 1000,
-            retried: false,
-            reason: "wait_cap_exceeded",
-          },
-        ],
-      });
-    }
-
-    expect(attempts).toBe(1);
-    expect(sleeps).toBe(0);
-  });
-
-  test("does not repeat a completed create stage when a later patch retries", async () => {
-    process.env[retryEnv] = "1";
-    let createCalls = 0;
-    let patchCalls = 0;
-
-    const created = await apiCall(async () => {
-      createCalls += 1;
-      return { id: "11111111-1111-4111-8111-111111111111" };
-    });
-    await apiCall(
-      async () => {
-        patchCalls += 1;
-        if (patchCalls === 1) {
-          throw new CapacitiesApiError(
-            429,
-            "cap_rate_limit_exceeded",
-            "Wait.",
-            { retryAfter: 0 },
-          );
-        }
-        return { id: created.id, patched: true };
-      },
-      {
-        random: () => 0,
-        sleep: async () => undefined,
-      },
-    );
-
-    expect(createCalls).toBe(1);
-    expect(patchCalls).toBe(2);
-  });
-
-  test("zero completely disables automatic waiting and retrying", async () => {
-    process.env[retryEnv] = "0";
-    let attempts = 0;
-    let sleeps = 0;
-
-    try {
-      await apiCall(
-        async () => {
-          attempts += 1;
-          throw new CapacitiesApiError(
-            429,
-            "cap_rate_limit_exceeded",
-            "Wait.",
-            { retryAfter: 10 },
-          );
-        },
-        {
-          sleep: async () => {
-            sleeps += 1;
-          },
-        },
-      );
-      throw new Error("apiCall should have failed");
-    } catch (error) {
-      expect(error).toBeInstanceOf(CapacitiesApiError);
-      expect((error as CapacitiesApiError).details).toMatchObject({
-        retryAfter: 10,
-        attempts: 1,
-        maxRetries: 0,
-      });
-    }
-
-    expect(attempts).toBe(1);
-    expect(sleeps).toBe(0);
-  });
-
-  test("zero wait cap disables retry even when retry count is positive", async () => {
-    process.env[retryEnv] = "3";
-    process.env[waitEnv] = "0";
-    let attempts = 0;
 
     await expect(
       apiCall(
         async () => {
           attempts += 1;
-          throw new CapacitiesApiError(
-            429,
-            "cap_rate_limit_exceeded",
-            "Wait.",
-            { retryAfter: 0 },
-          );
+          throw error;
         },
         { stage: "mutation" },
       ),
-    ).rejects.toBeInstanceOf(CapacitiesApiError);
+    ).rejects.toMatchObject({ status: 429, code: "cap_rate_limit_exceeded" });
     expect(attempts).toBe(1);
   });
 
-  test("does not retry server, network, or non-429 API errors", async () => {
-    process.env[retryEnv] = "4";
-    const errors = [
-      new CapacitiesApiError(503, "cap_unavailable", "Unavailable."),
-      new CapacitiesApiError(429, "cap_other_error", "Not a rate-limit error."),
-      new CapacitiesApiError(
-        500,
-        "cap_rate_limit_exceeded",
-        "Wrong status for a rate-limit code.",
-      ),
-      new TypeError("network failed"),
-    ];
+  test("fails over within the same request and isolates endpoints", async () => {
+    const keys = "pool-key-a,pool-key-b";
+    const rateLimit = new CapacitiesApiError(
+      429,
+      "cap_rate_limit_exceeded",
+      "Wait.",
+      { retryAfter: 60 },
+    );
+    const attempted: string[] = [];
+    const result = await withPooledApiToken(
+      "pool-key-a,pool-key-b",
+      "GET /objects/search",
+      async (token) => {
+        attempted.push(token);
+        if (token === "pool-key-a") {
+          throw rateLimit;
+        }
+        return token;
+      },
+    );
+    expect(result).toBe("pool-key-b");
+    expect(attempted).toEqual(["pool-key-a", "pool-key-b"]);
 
-    for (const expectedError of errors) {
-      let attempts = 0;
-      try {
-        await apiCall(async () => {
-          attempts += 1;
-          throw expectedError;
-        });
-      } catch (error) {
-        expect(error).toBe(expectedError);
-      }
-      expect(attempts).toBe(1);
+    const isolatedToken = await withPooledApiToken(
+      keys,
+      "POST /objects/search",
+      async (token) => token,
+    );
+    expect(isolatedToken).toBe("pool-key-a");
+  });
+
+  test("returns 429 after every key is rate-limited", async () => {
+    const rateLimit = new CapacitiesApiError(
+      429,
+      "cap_rate_limit_exceeded",
+      "Wait.",
+      { retryAfter: 60 },
+    );
+    const attempted: string[] = [];
+
+    await expect(
+      withPooledApiToken("all-key-a,all-key-b", "GET /space", async (token) => {
+        attempted.push(token);
+        throw rateLimit;
+      }),
+    ).rejects.toBe(rateLimit);
+    expect(attempted).toEqual(["all-key-a", "all-key-b"]);
+  });
+
+  test("uses pooled credentials for SDK requests", async () => {
+    const originalFetch = globalThis.fetch;
+    const authorizationHeaders: string[] = [];
+    globalThis.fetch = (async (_input, init) => {
+      authorizationHeaders.push(
+        new Headers(init?.headers).get("Authorization") ?? "",
+      );
+      return new Response(JSON.stringify({ id: "space-1", title: "Test" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const client = getClient("sdk-key-a;sdk-key-b");
+      await client.space.get();
+      await client.space.get();
+    } finally {
+      globalThis.fetch = originalFetch;
     }
+
+    expect(authorizationHeaders).toEqual([
+      "Bearer sdk-key-a",
+      "Bearer sdk-key-b",
+    ]);
   });
 });
 

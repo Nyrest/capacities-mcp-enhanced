@@ -211,7 +211,7 @@ export async function readbackObject({
   object: GetObjectResponse;
   verification: ReadbackVerification;
 }> {
-  if (getReadbackMode() === "off") {
+  if (!getReadbackMode()) {
     return {
       object: fallback,
       verification: {
@@ -267,7 +267,7 @@ export async function readbackDeletedObject(
   force = false,
   stage: ApiCallStage = "readback",
 ): Promise<ReadbackVerification> {
-  if (!force && getReadbackMode() === "off") {
+  if (!force && !getReadbackMode()) {
     return {
       status: "disabled",
       readbackPerformed: false,

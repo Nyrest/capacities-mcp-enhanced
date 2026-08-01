@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { open, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
-import { CapacitiesApiError } from "@capacities/api";
 import {
   apiCall,
   getClient,
@@ -32,7 +31,6 @@ export type UploadMode = "wait" | "background";
 export type UploadJobStatus =
   | "queued"
   | "running"
-  | "waiting_rate_limit"
   | "completed"
   | "completed_with_warnings"
   | "partial"
@@ -211,23 +209,6 @@ function setItemStatus(
   emit(job);
 }
 
-function isRateLimited(error: unknown): error is CapacitiesApiError {
-  return (
-    error instanceof CapacitiesApiError &&
-    error.status === 429 &&
-    error.code === "cap_rate_limit_exceeded"
-  );
-}
-
-function rateLimitWaitMs(error: CapacitiesApiError): number {
-  const details = error.details as Record<string, unknown> | undefined;
-  const retryAfter =
-    details && typeof details.retryAfter === "number"
-      ? Math.max(1, details.retryAfter * 1000)
-      : 2_000;
-  return Math.min(Math.max(retryAfter + 250, 1_000), 65_000);
-}
-
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return Promise.reject(signal.reason ?? new Error("Upload cancelled."));
@@ -254,28 +235,8 @@ async function uploadCall<T>(
     | "upload_complete"
     | "upload_abort"
     | "upload_readback",
-  expiresAt?: string,
 ): Promise<T> {
-  while (true) {
-    try {
-      return await apiCall(operation, { signal: job.controller.signal, stage });
-    } catch (error) {
-      if (!isRateLimited(error) || job.controller.signal.aborted) {
-        throw error;
-      }
-      const waitMs = rateLimitWaitMs(error);
-      if (expiresAt && Date.now() + waitMs >= Date.parse(expiresAt)) {
-        throw error;
-      }
-      job.status = "waiting_rate_limit";
-      emit(job);
-      await delay(waitMs, job.controller.signal);
-      if (!isTerminal(job.status)) {
-        job.status = "running";
-        emit(job);
-      }
-    }
-  }
+  return apiCall(operation, { signal: job.controller.signal, stage });
 }
 
 function mediaVerification(
@@ -402,7 +363,6 @@ async function processFile(
               job.controller.signal,
             ),
           "upload_part",
-          activeInit.expiresAt,
         );
         if (uploaded.number !== partNumber || uploaded.size !== length) {
           throw new McpToolError(
@@ -438,7 +398,6 @@ async function processFile(
       () =>
         completeMediaUpload(activeInit.id, job.apiToken, job.controller.signal),
       "upload_complete",
-      activeInit.expiresAt,
     );
     item.sessionId = undefined;
     item.objectId = completed.id;

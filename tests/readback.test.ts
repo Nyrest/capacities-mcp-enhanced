@@ -182,7 +182,7 @@ describe("synchronous mutation readback", () => {
   });
 
   test("can disable ordinary readback while preserving forced rollback verification", async () => {
-    process.env[readbackEnv] = "off";
+    process.env[readbackEnv] = "false";
     let reads = 0;
     const client = clientWithGet(async () => {
       reads += 1;
