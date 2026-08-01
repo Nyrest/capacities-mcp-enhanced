@@ -23,27 +23,48 @@ Capacities MCP brings rich, read-write access to your knowledge base through one
 - Node.js 20+ or Bun 1.3+
 - A personal token from the new Capacities API with the permissions you need
 
+### Installation
+
+Configure your MCP client to use the Capacities MCP server:
+
 Generate a token in **Capacities → Settings → Capacities API → Generate new token**. New API tokens begin with `cap-api-`.
 
-```bash
-bun install
-bun run build
-```
-
-Configure your MCP client to launch the built stdio server:
+#### Claude Code
 
 ```json
 {
   "mcpServers": {
     "capacities": {
-      "command": "node",
-      "args": ["/path/to/capacities-mcp-v2/dist/stdio.js"],
+      "command": "npx",
+      "args": ["--yes", "capacities-mcp-v2@latest"],
       "env": {
-        "CAPACITIES_API_TOKEN": "cap-api-..."
+        "CAPACITIES_API_TOKEN": "cap-api-your-token"
       }
     }
   }
 }
+```
+
+#### Hermes Agent
+
+```yaml
+mcp_servers:
+  capacities:
+    command: "npx"
+    args:
+      - "--yes"
+      - "capacities-mcp-v2@latest"
+    env:
+      CAPACITIES_API_TOKEN: "cap-api-your-token"
+    supports_parallel_tool_calls: true
+```
+
+### Install the bundled skills (Optional)
+
+By installing the bundled Capacities MCP Best Practices skill, your agent can learn the full workflow, strict content schemas, safe mutation patterns, rate-limit recovery, and common pitfalls.
+
+```bash
+npx skills add nyrest/capacities-mcp-best-practice
 ```
 
 ## 🧰 What agents can do
@@ -65,12 +86,6 @@ Configure your MCP client to launch the built stdio server:
 | Update content | `delete_object` | Move an object to trash or permanently delete it when explicitly requested. |
 | Daily Notes | `append_daily_note` | Add structured blocks to today's or a dated Daily Note. |
 | Daily Notes | `append_daily_note_markdown` | Add Markdown to today's or a dated Daily Note. |
-
-## 📦 Bundled agent skill
-
-The repository includes [Capacities MCP Best Practices](skills/capacities-mcp-best-practice/SKILL.md), a portable skill for MCP-capable agents. It teaches the full workflow, every tool and parameter, strict content schemas, safe mutation patterns, rate-limit recovery, and common pitfalls.
-
-If your agent supports skills, install or expose the complete `skills/capacities-mcp-best-practice` folder. The skill uses progressive disclosure, so detailed references are loaded only when the task needs them.
 
 ## ⚙️ Optional controls
 
