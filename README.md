@@ -1,12 +1,12 @@
 # Capacities MCP Enhanced — API 2.0 for AI Agents
 
-🧠 Give Codex, Claude, Hermes, and any MCP-compatible agent a reliable way to work with your Capacities space.
+The official MCP server sucks, it's time to make a new one.
 
-> Built for the new **Capacities API 2.0**
+> Built for the new **Capacities API 2.0** with native precise block level CRUD support.
 
 Capacities MCP brings rich, read-write access to your knowledge base through one agent-friendly server. Agents can discover your object types, understand custom properties, create polished content, make precise edits, save web resources, and work with Daily Notes.
 
-## ✨ Why Capacities MCP
+## ✨ Why Capacities MCP Enhanced
 
 - **Two first-class authoring engines** — fast Markdown writing and precise structured blocks in one server.
 - **Full CRUD with Capacities API 2.0** — objects, custom properties, collections, blocks, web links, tasks, tags, and Daily Notes.
