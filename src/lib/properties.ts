@@ -15,6 +15,12 @@ function comparable(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
+export function isAgentWritableProperty(
+  definition: SpacePropertyDefinition,
+): boolean {
+  return definition.writable && definition.type !== "lastUpdatedAt";
+}
+
 function uniqueById<T extends { id: string }>(values: T[]): T[] {
   return [...new Map(values.map((value) => [value.id, value])).values()];
 }
@@ -375,7 +381,7 @@ export function normalizePropertyFields(
   for (const [identifier, value] of Object.entries(fields)) {
     const definition = resolveProperty(structure, identifier);
 
-    if (!definition.writable) {
+    if (!isAgentWritableProperty(definition)) {
       throw new Error(
         `Property "${definition.name}" (${definition.id}) is read-only.`,
       );
@@ -415,7 +421,7 @@ function acceptedInput(definition: SpacePropertyDefinition): string {
     case "aliases":
       return "string | string[] (maximum 8) | null";
     case "icon":
-      return '{ type: "emoji" | "iconify", value: string } | null';
+      return '{ type: "emoji", value: string } | { type: "iconify", value: regular Phosphor ph-name } | null';
     case "createdAt":
       return "ISO datetime string";
     case "richText":
@@ -439,7 +445,7 @@ export function createAgentWriteGuide(structure: SpaceStructure) {
       id: definition.id,
       name: definition.name,
       type: definition.type,
-      writable: definition.writable,
+      writable: isAgentWritableProperty(definition),
       acceptedInput: acceptedInput(definition),
       ...(definition.multiple === undefined
         ? {}

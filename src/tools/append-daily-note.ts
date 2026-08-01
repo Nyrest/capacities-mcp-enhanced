@@ -1,8 +1,11 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, runTool } from "../lib/client";
+import { apiCall, getClient, runTool } from "../lib/client";
 import { canonicalDailyDate } from "../lib/properties";
+import { asynchronousVerification } from "../lib/readback";
 import { authSchema, writableBlocksSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   blocks: writableBlocksSchema,
@@ -33,25 +36,28 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function appendDailyNote({
-  blocks,
-  date,
-  noTimestamp,
-  apiToken,
-}: InferSchema<typeof schema>) {
+export default async function appendDailyNote(
+  { blocks, date, noTimestamp, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
   return runTool(async () => {
     const client = getClient(apiToken);
     const canonicalDate = date ? canonicalDailyDate(date) : undefined;
-    await client.blocks.dailyNote.append({
-      blocks,
-      date: canonicalDate,
-      noTimeStamp: noTimestamp,
-    });
+    await apiCall(
+      () =>
+        client.blocks.dailyNote.append({
+          blocks,
+          date: canonicalDate,
+          noTimeStamp: noTimestamp,
+        }),
+      { signal: extra?.signal, stage: "daily_note_enqueue" },
+    );
 
     return {
       status: "queued",
       date: canonicalDate ?? "today_utc",
       noTimestamp: noTimestamp ?? false,
+      verification: asynchronousVerification(),
     };
   });
 }

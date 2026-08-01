@@ -1,6 +1,6 @@
 {
   "name": "capacities-mcp-v2",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Agent-oriented Capacities API 2.0 MCP server built with xmcp",
   "engines": {
     "node": ">=20.0.0"
@@ -11,8 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:live": "bun test tests/live/capacities.live.test.ts",
-    "build": "bun run lint && bun run typecheck && xmcp build",
+    "build": "npm run lint && npm run typecheck && xmcp build",
     "verify:tools": "bun run scripts/verify-tools.ts",
+    "release:check": "npm run lint && npm run typecheck && bun test && npm run verify:tools && npm run build",
+    "prepack": "npm run build",
     "dev": "xmcp dev",
     "start": "node dist/stdio.js"
   },
@@ -22,11 +24,21 @@
     "zod": "^4.0.0"
   },
   "main": "./dist/stdio.js",
+  "keywords": [
+    "mcp",
+    "capacities",
+    "knowledge-management",
+    "xmcp"
+  ],
   "files": [
-    "dist"
+    "dist",
+    "skills"
   ],
   "bin": {
-    "capacities-mcp-v2": "./dist/stdio.js"
+    "capacities-mcp-v2": "dist/stdio.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",

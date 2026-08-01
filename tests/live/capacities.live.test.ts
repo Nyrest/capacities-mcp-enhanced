@@ -32,6 +32,12 @@ type StructureSchema = {
 type CreatedObject = {
   status: string;
   object: { id: string; structureId: string };
+  verification: Verification;
+  lossReport?: {
+    analysisLevel: string;
+    detectedLosses: unknown[];
+    entityLinks?: Array<{ outcome: string; entityId?: string }>;
+  };
 };
 
 type SearchResult = {
@@ -55,9 +61,30 @@ type LiveBlock = {
   type: string;
   blocks?: LiveBlock[];
   columns?: LiveBlock[][];
+  tokens?: Array<{ type: string; text: string; entityId?: string }>;
 };
 
-type StatusResult = { status: string };
+type Verification = {
+  readbackPerformed: boolean;
+  readbackVerified: boolean;
+  snapshotSource: string;
+  writeState?: string;
+};
+
+type StatusResult = {
+  status: string;
+  verification: Verification;
+  lossReport?: { analysisLevel: string; detectedLosses: unknown[] };
+};
+
+type ErrorEnvelope = {
+  isError: true;
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+};
 
 const LIVE_REQUEST_PACING_MS = 2_100;
 
@@ -101,12 +128,29 @@ function installLiveFetchPacing(): () => void {
 }
 
 function data<T>(result: unknown): T {
-  const structuredContent = (result as { structuredContent?: unknown })
-    .structuredContent;
-  if (!structuredContent || typeof structuredContent !== "object") {
+  const envelope = (result as { structuredContent?: unknown })
+    .structuredContent as
+    | { isError: false; data: T }
+    | ErrorEnvelope
+    | undefined;
+  if (!envelope || typeof envelope !== "object") {
     throw new Error("MCP tool returned no structured content.");
   }
-  return structuredContent as T;
+  if (envelope.isError) {
+    throw new Error(
+      `${envelope.error.code}: ${envelope.error.message} ${JSON.stringify(envelope.error.details ?? {})}`,
+    );
+  }
+  return envelope.data;
+}
+
+function failure(result: unknown): ErrorEnvelope["error"] {
+  const envelope = (result as { structuredContent?: unknown })
+    .structuredContent as ErrorEnvelope | undefined;
+  if (envelope?.isError !== true) {
+    throw new Error("MCP tool did not return the expected error envelope.");
+  }
+  return envelope.error;
 }
 
 function findLiveBlock(blocks: LiveBlock[], id: string): LiveBlock | undefined {
@@ -184,6 +228,11 @@ liveTest(
         }),
       );
       expect(created.status).toBe("created");
+      expect(created.verification).toMatchObject({
+        readbackPerformed: true,
+        readbackVerified: true,
+        snapshotSource: "server_readback",
+      });
       const createdObjectId = created.object.id;
       objectId = createdObjectId;
 
@@ -235,6 +284,8 @@ liveTest(
         }),
       );
       expect(blockUpdated.status).toBe("updated");
+      expect(blockUpdated.verification.readbackPerformed).toBe(true);
+      expect(blockUpdated.verification.readbackVerified).toBe(true);
 
       const blockUpdatedRead = await retry(
         async () =>
@@ -265,6 +316,7 @@ liveTest(
         await updateObject({ id: createdObjectId, title: updatedTitle }),
       );
       expect(updated.status).toBe("updated");
+      expect(updated.verification.readbackPerformed).toBe(true);
 
       const appendMarker = `append-${marker}`;
       const appended = data<StatusResult>(
@@ -275,6 +327,7 @@ liveTest(
         }),
       );
       expect(appended.status).toBe("appended");
+      expect(appended.verification.readbackVerified).toBe(true);
 
       const appendedRead = await retry(
         async () =>
@@ -294,6 +347,10 @@ liveTest(
         }),
       );
       expect(markdownAppended.status).toBe("appended");
+      expect(markdownAppended.verification.readbackPerformed).toBe(true);
+      expect(markdownAppended.lossReport?.analysisLevel).toBe(
+        "preflight_and_readback",
+      );
 
       const markdownAppendedRead = await retry(
         async () =>
@@ -306,6 +363,53 @@ liveTest(
         markdownAppendMarker,
       );
 
+      const entityAppended = data<
+        StatusResult & {
+          lossReport?: CreatedObject["lossReport"];
+        }
+      >(
+        await appendContentMarkdown({
+          id: createdObjectId,
+          markdown: `[Self link](https://app.capacities.io/${catalog.space.id}/${createdObjectId})`,
+          position: "end",
+        }),
+      );
+      expect(entityAppended.lossReport?.entityLinks).toContainEqual(
+        expect.objectContaining({
+          outcome: "converted",
+          entityId: createdObjectId,
+        }),
+      );
+      const entityRead = await retry(
+        async () =>
+          data<StructuredObject>(
+            await getObject({ id: createdObjectId, format: "structured" }),
+          ),
+        (result) =>
+          Object.values(result.object.blocks)
+            .flat()
+            .some((block) =>
+              (block.tokens ?? []).some(
+                (token) =>
+                  token.type === "LinkToken" &&
+                  token.entityId === createdObjectId &&
+                  token.text === "Self link",
+              ),
+            ),
+      );
+      expect(
+        Object.values(entityRead.object.blocks)
+          .flat()
+          .some((block) =>
+            (block.tokens ?? []).some(
+              (token) =>
+                token.type === "LinkToken" &&
+                token.entityId === createdObjectId &&
+                token.text === "Self link",
+            ),
+          ),
+      ).toBe(true);
+
       const markdownCreated = data<CreatedObject>(
         await createObjectMarkdown({
           structure: "RootPage",
@@ -314,11 +418,34 @@ liveTest(
         }),
       );
       expect(markdownCreated.status).toBe("created");
+      expect(markdownCreated.verification.readbackPerformed).toBe(true);
+      expect(markdownCreated.lossReport?.analysisLevel).toBe(
+        "preflight_and_readback",
+      );
       markdownObjectId = markdownCreated.object.id;
       const markdownCreatedRead = data<MarkdownObject>(
         await getObject({ id: markdownObjectId, format: "markdown" }),
       );
       expect(markdownCreatedRead.object.markdown).toContain(marker);
+
+      const rollbackTitle = `${originalTitle} rollback`;
+      const rollbackError = failure(
+        await createObjectMarkdown({
+          structure: "RootPage",
+          title: rollbackTitle,
+          markdown: `Rollback marker: ${marker}`,
+          collections: ["99999999-9999-4999-8999-999999999999"],
+        }),
+      );
+      expect(rollbackError.code).toBe("mcp_transaction_rolled_back");
+      const rollbackSearch = data<SearchResult>(
+        await searchObjects({
+          query: rollbackTitle,
+          structures: ["RootPage"],
+          limit: 10,
+        }),
+      );
+      expect(rollbackSearch.results).toHaveLength(0);
 
       const imported = data<CreatedObject>(
         await createObjectFromUrl({
@@ -330,6 +457,7 @@ liveTest(
       );
       urlObjectId = imported.object.id;
       expect(imported.status).toBe("created");
+      expect(imported.verification.readbackPerformed).toBe(true);
 
       const importedStructured = data<StructuredObject>(
         await getObject({ id: urlObjectId, format: "structured" }),
@@ -344,6 +472,7 @@ liveTest(
         await deleteBlock({ id: urlObjectId, blockId: importedBlock.id }),
       );
       expect(deletedBlock.status).toBe("deleted");
+      expect(deletedBlock.verification.readbackVerified).toBe(true);
 
       const afterBlockDelete = data<StructuredObject>(
         await getObject({ id: urlObjectId, format: "structured" }),
@@ -362,6 +491,9 @@ liveTest(
       );
       markdownUrlObjectId = markdownImported.object.id;
       expect(markdownImported.status).toBe("created");
+      expect(markdownImported.lossReport?.analysisLevel).toBe(
+        "preflight_and_readback",
+      );
       const markdownImportedRead = data<MarkdownObject>(
         await getObject({ id: markdownUrlObjectId, format: "markdown" }),
       );
@@ -371,6 +503,7 @@ liveTest(
         await deleteObject({ id: createdObjectId, permanent: false }),
       );
       expect(trashed.status).toBe("moved_to_trash");
+      expect(trashed.verification.readbackVerified).toBe(true);
       objectId = undefined;
 
       const permanentCandidate = data<CreatedObject>(
@@ -388,6 +521,7 @@ liveTest(
         }),
       );
       expect(permanentlyDeleted.status).toBe("permanently_deleted");
+      expect(permanentlyDeleted.verification.readbackVerified).toBe(true);
       objectId = undefined;
 
       const markdownDaily = data<StatusResult>(
@@ -398,6 +532,11 @@ liveTest(
         }),
       );
       expect(markdownDaily.status).toBe("queued");
+      expect(markdownDaily.verification).toMatchObject({
+        readbackPerformed: false,
+        readbackVerified: false,
+      });
+      expect(markdownDaily.lossReport?.analysisLevel).toBe("preflight_only");
 
       const daily = data<StatusResult>(
         await appendDailyNote({
@@ -409,6 +548,10 @@ liveTest(
         }),
       );
       expect(daily.status).toBe("queued");
+      expect(daily.verification).toMatchObject({
+        readbackPerformed: false,
+        readbackVerified: false,
+      });
     } finally {
       if (objectId) {
         try {

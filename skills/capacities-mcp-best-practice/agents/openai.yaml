@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capacities MCP Best Practices"
+  short_description: "Reliable Capacities workflows for MCP agents"
+  default_prompt: "Use $capacities-mcp-best-practice to safely plan and execute this Capacities task."

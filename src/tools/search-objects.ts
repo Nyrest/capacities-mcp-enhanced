@@ -1,8 +1,10 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, getStructures, runTool } from "../lib/client";
+import { apiCall, getClient, getStructures, runTool } from "../lib/client";
 import { resolveStructure } from "../lib/properties";
 import { authSchema, structureSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   query: z
@@ -23,7 +25,7 @@ export const schema = {
     .max(50)
     .optional()
     .default(20)
-    .describe("Maximum results."),
+    .describe("Maximum results: integer from 1 to 50. Default: 20."),
   ...authSchema,
 };
 
@@ -40,23 +42,30 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function searchObjects({
-  query,
-  structures: requestedStructures,
-  limit,
-  apiToken,
-}: InferSchema<typeof schema>) {
+export default async function searchObjects(
+  {
+    query,
+    structures: requestedStructures,
+    limit,
+    apiToken,
+  }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
   return runTool(async () => {
     const client = getClient(apiToken);
-    const structures = await getStructures(client);
+    const structures = await getStructures(client, false, extra?.signal);
     const structureIds = requestedStructures?.map(
       (identifier) => resolveStructure(structures, identifier).id,
     );
-    const response = await client.objects.search({
-      query,
-      structureIds,
-      limit,
-    });
+    const response = await apiCall(
+      () =>
+        client.objects.search({
+          query,
+          structureIds,
+          limit,
+        }),
+      { signal: extra?.signal, stage: "discovery" },
+    );
     const titlesById = new Map(structures.map(({ id, title }) => [id, title]));
 
     return {

@@ -1,7 +1,15 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, runTool } from "../lib/client";
+import {
+  apiCall,
+  getClient,
+  runTool,
+  withObjectMutationLock,
+} from "../lib/client";
+import { readbackDeletedObject } from "../lib/readback";
 import { authSchema, objectIdSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   id: objectIdSchema,
@@ -28,18 +36,28 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function deleteObject({
-  id,
-  permanent,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  return runTool(async () => {
-    const client = getClient(apiToken);
-    await client.object.delete({ id, hardDelete: permanent });
+export default async function deleteObject(
+  { id, permanent, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(() =>
+    withObjectMutationLock(id, async () => {
+      const client = getClient(apiToken);
+      await apiCall(() => client.object.delete({ id, hardDelete: permanent }), {
+        signal: extra?.signal,
+        stage: "mutation",
+      });
+      const verification = await readbackDeletedObject(
+        client,
+        id,
+        extra?.signal,
+      );
 
-    return {
-      status: permanent ? "permanently_deleted" : "moved_to_trash",
-      id,
-    };
-  });
+      return {
+        status: permanent ? "permanently_deleted" : "moved_to_trash",
+        id,
+        verification,
+      };
+    }),
+  );
 }

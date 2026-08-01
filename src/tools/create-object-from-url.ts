@@ -1,5 +1,12 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
-import { formatError, getClient, toolResult } from "../lib/client";
+import {
+  apiCall,
+  getClient,
+  McpToolError,
+  normalizeError,
+  runTool,
+} from "../lib/client";
+import { allBlockIds, checkObjectState, readbackObject } from "../lib/readback";
 import { authSchema, writableBlocksSchema } from "../lib/schemas";
 import {
   createUrlProperties,
@@ -7,6 +14,8 @@ import {
   sourceTitleSchema,
   sourceUrlSchema,
 } from "../lib/url";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   url: sourceUrlSchema,
@@ -29,44 +38,79 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function createObjectFromUrl({
-  url,
-  title,
-  description,
-  blocks,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  const operation = async () => {
+export default async function createObjectFromUrl(
+  { url, title, description, blocks, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(async () => {
     const client = getClient(apiToken);
-    const object = await client.object.createFromUrl({
-      url,
-      properties: createUrlProperties(title, description),
-    });
+    const properties = createUrlProperties(title, description);
+    const object = await apiCall(
+      () =>
+        client.object.createFromUrl({
+          url,
+          properties,
+        }),
+      { signal: extra?.signal, stage: "mutation" },
+    );
 
     if (!blocks) {
-      return toolResult({ status: "created", object });
+      const readback = await readbackObject({
+        client,
+        id: object.id,
+        fallback: object,
+        signal: extra?.signal,
+        check: checkObjectState({
+          id: object.id,
+          structureId: object.structureId,
+          properties,
+        }),
+      });
+      return {
+        status: "created",
+        object: readback.object,
+        verification: readback.verification,
+      };
     }
 
     try {
-      const updated = await client.blocks.append({
+      const updated = await apiCall(
+        () =>
+          client.blocks.append({
+            id: object.id,
+            blocks,
+          }),
+        { signal: extra?.signal, stage: "mutation" },
+      );
+      const readback = await readbackObject({
+        client,
         id: object.id,
-        blocks,
+        fallback: updated,
+        signal: extra?.signal,
+        check: checkObjectState({
+          id: object.id,
+          structureId: object.structureId,
+          properties,
+          presentBlockIds: allBlockIds(updated),
+        }),
       });
-      return toolResult({ status: "created", object: updated });
+      return {
+        status: "created",
+        object: readback.object,
+        verification: readback.verification,
+      };
     } catch (error) {
-      return toolResult({
-        status: "partial",
-        object,
-        warning:
-          "The URL object was created, but its structural blocks could not be appended.",
-        error: formatError(error),
-      });
+      throw new McpToolError(
+        "mcp_partial_failure",
+        "The URL object was created, but its structural blocks could not be appended.",
+        {
+          stage: "append_blocks",
+          recoverableObjectId: object.id,
+          cause: normalizeError(error),
+          recovery:
+            "Retry append_content for this object ID, or delete the object.",
+        },
+      );
     }
-  };
-
-  try {
-    return await operation();
-  } catch (error) {
-    throw new Error(formatError(error));
-  }
+  });
 }

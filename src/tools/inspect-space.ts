@@ -1,12 +1,15 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, getStructures, runTool } from "../lib/client";
+import { apiCall, getClient, getStructures, runTool } from "../lib/client";
 import {
   createAgentWriteGuide,
+  isAgentWritableProperty,
   resolveStructure,
   structureCreateTool,
 } from "../lib/properties";
 import { authSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   structure: z
@@ -39,16 +42,18 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function inspectSpace({
-  structure,
-  refresh,
-  apiToken,
-}: InferSchema<typeof schema>) {
+export default async function inspectSpace(
+  { structure, refresh, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
   return runTool(async () => {
     const client = getClient(apiToken);
     const [space, structures] = await Promise.all([
-      client.space.get(),
-      getStructures(client, refresh),
+      apiCall(() => client.space.get(), {
+        signal: extra?.signal,
+        stage: "discovery",
+      }),
+      getStructures(client, refresh, extra?.signal),
     ]);
 
     if (structure) {
@@ -78,8 +83,8 @@ export default async function inspectSpace({
           labelColor,
           collections,
           propertyCount: propertyDefinitions.length,
-          writablePropertyCount: propertyDefinitions.filter(
-            ({ writable }) => writable,
+          writablePropertyCount: propertyDefinitions.filter((definition) =>
+            isAgentWritableProperty(definition),
           ).length,
           createTool: structureCreateTool(structure),
         };

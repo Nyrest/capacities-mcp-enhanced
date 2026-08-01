@@ -62,12 +62,31 @@ export const agentDateValueSchema = z
   })
   .strict();
 
-export const agentIconValueSchema = z
-  .object({
-    type: z.enum(["emoji", "iconify"]),
-    value: z.string().min(1),
-  })
-  .strict();
+const regularPhosphorIconSchema = z
+  .string()
+  .regex(
+    /^ph-[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Iconify value must use regular Phosphor ph-name syntax.",
+  )
+  .refine(
+    (value) => !/-(?:duotone|fill|bold|light|thin)$/.test(value),
+    "Styled Phosphor variants are not accepted.",
+  );
+
+export const agentIconValueSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("emoji"),
+      value: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("iconify"),
+      value: regularPhosphorIconSchema,
+    })
+    .strict(),
+]);
 
 export const agentPropertyValueSchema = z.union([
   z.string(),
@@ -91,3 +110,43 @@ export type AgentPropertyValue = z.infer<typeof agentPropertyValueSchema>;
 
 export const writableBlockSchema = agentWritableBlockSchema;
 export const writableBlocksSchema = agentWritableBlocksSchema;
+
+export const toolOutputEnvelopeSchema = z.discriminatedUnion("isError", [
+  z
+    .object({
+      isError: z.literal(false),
+      data: z.record(z.string(), z.unknown()),
+    })
+    .strict(),
+  z
+    .object({
+      isError: z.literal(true),
+      error: z
+        .object({
+          code: z.string(),
+          message: z.string(),
+          details: z.unknown().optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+
+export const toolOutputSchema = {
+  isError: z
+    .boolean()
+    .describe("False for success; true when error is present."),
+  data: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("Success payload. Present when isError is false."),
+  error: z
+    .object({
+      code: z.string(),
+      message: z.string(),
+      details: z.unknown().optional(),
+    })
+    .strict()
+    .optional()
+    .describe("Stable error payload. Present when isError is true."),
+};

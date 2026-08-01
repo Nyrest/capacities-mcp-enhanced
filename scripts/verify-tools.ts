@@ -6,6 +6,9 @@ type JsonSchema = {
   format?: string;
   pattern?: string;
   minItems?: number;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
   required?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
@@ -55,6 +58,36 @@ function assertStrictObject(schema: JsonSchema, label: string): void {
   expect(
     schema.additionalProperties === false,
     `${label} must reject unknown keys`,
+  );
+}
+
+function verifyOutputEnvelope(toolName: string, schema?: JsonSchema): void {
+  expect(schema, `${toolName}.outputSchema is missing`);
+  expect(
+    schema.type === "object",
+    `${toolName}.outputSchema must be an object`,
+  );
+  expect(
+    schema.required?.includes("isError"),
+    `${toolName}.outputSchema must require isError`,
+  );
+  expect(
+    schema.properties?.isError?.type === "boolean",
+    `${toolName}.outputSchema.isError must be boolean`,
+  );
+  expect(
+    schema.properties?.data?.type === "object" &&
+      schema.properties.data.additionalProperties !== false,
+    `${toolName}.outputSchema must expose the success data object`,
+  );
+  expect(
+    schema.properties?.error?.type === "object",
+    `${toolName}.outputSchema must expose the error object`,
+  );
+  expect(
+    schema.properties?.error?.required?.includes("code") &&
+      schema.properties.error.required.includes("message"),
+    `${toolName}.outputSchema.error must require code and message`,
   );
 }
 
@@ -162,7 +195,9 @@ function verifyStructuralSchema(schema: JsonSchema): void {
 }
 
 const connection = await createSTDIOClient({
-  command: process.execPath,
+  // Verify the npm runtime target explicitly. Running this script through Bun
+  // must not leave a Bun child process holding dist files on Windows.
+  command: process.platform === "win32" ? "node.exe" : "node",
   args: ["dist/stdio.js"],
   cwd: process.cwd(),
   stderr: "pipe",
@@ -185,6 +220,10 @@ try {
         `Tool ${tool.name} is missing a description or input schema.`,
       );
     }
+    verifyOutputEnvelope(
+      tool.name,
+      tool.outputSchema as JsonSchema | undefined,
+    );
   }
 
   const createObject = tools.find(({ name }) => name === "create_object");
@@ -195,6 +234,17 @@ try {
   expect(
     search?.description?.toLowerCase().includes("title-only"),
     "search_objects must clearly disclose title-only search",
+  );
+  const searchLimit = (search?.inputSchema as JsonSchema | undefined)
+    ?.properties?.limit;
+  expect(
+    searchLimit?.minimum === 1 && searchLimit.maximum === 50,
+    "search_objects.limit must expose the 1-50 range",
+  );
+  expect(
+    searchLimit?.description?.includes("1 to 50") ||
+      searchLimit?.description?.includes("1–50"),
+    "search_objects.limit description must disclose the maximum of 50",
   );
 
   const createFromUrl = tools.find(

@@ -1,12 +1,24 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
 import { childBlocks, findBlock, requireBlock } from "../lib/blocks";
-import { getClient, runTool } from "../lib/client";
+import {
+  apiCall,
+  getClient,
+  runTool,
+  withObjectMutationLock,
+} from "../lib/client";
+import {
+  containsExpectedState,
+  type ReadbackMismatch,
+  readbackObject,
+} from "../lib/readback";
 import {
   authSchema,
   objectIdSchema,
   writableBlockSchema,
 } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   id: objectIdSchema,
@@ -37,68 +49,121 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function updateBlock({
-  id,
-  blockId,
-  propertyId,
-  block,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  return runTool(async () => {
-    const client = getClient(apiToken);
-    const before = await client.object.get({ id });
-    const located = requireBlock(before, blockId, propertyId);
-    if (located.block.type !== block.type) {
-      throw new Error(
-        `Block type mismatch: existing block is ${located.block.type}, replacement is ${block.type}. Capacities requires the type to remain unchanged.`,
+export default async function updateBlock(
+  { id, blockId, propertyId, block, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(() =>
+    withObjectMutationLock(id, async () => {
+      const client = getClient(apiToken);
+      const before = await apiCall(() => client.object.get({ id }), {
+        signal: extra?.signal,
+        stage: "precondition_read",
+      });
+      const located = requireBlock(before, blockId, propertyId);
+      if (located.block.type !== block.type) {
+        throw new Error(
+          `Block type mismatch: existing block is ${located.block.type}, replacement is ${block.type}. Capacities requires the type to remain unchanged.`,
+        );
+      }
+
+      const childrenWereSupplied =
+        block.type === "TextBlock" || block.type === "GroupBlock"
+          ? block.blocks !== undefined
+          : block.type === "GridBlock"
+            ? block.columns !== undefined
+            : undefined;
+      const previousChildIds = childBlocks(located.block).map(({ id }) => id);
+
+      const object = await apiCall(
+        () =>
+          client.blocks.block.update({
+            id,
+            blockId,
+            propertyId: located.propertyId,
+            block,
+          }),
+        { signal: extra?.signal, stage: "mutation" },
       );
-    }
+      const mutationPersisted = findBlock(object, blockId, located.propertyId);
+      const expectedChildIds =
+        childrenWereSupplied === true && mutationPersisted
+          ? childBlocks(mutationPersisted.block).map(({ id }) => id)
+          : previousChildIds;
+      const readback = await readbackObject({
+        client,
+        id,
+        fallback: object,
+        signal: extra?.signal,
+        check: (snapshot) => {
+          const persisted = findBlock(snapshot, blockId, located.propertyId);
+          if (!persisted) {
+            return [
+              {
+                code: "block_missing",
+                path: `/blocks/${blockId}`,
+                message: `Block ${blockId} was not present.`,
+              },
+            ];
+          }
+          const mismatches: ReadbackMismatch[] = [];
+          if (persisted.block.type !== block.type) {
+            mismatches.push({
+              code: "block_type_mismatch",
+              path: `/blocks/${blockId}/type`,
+              message:
+                "Expected " +
+                block.type +
+                ", received " +
+                persisted.block.type +
+                ".",
+            });
+          }
+          if (!containsExpectedState(persisted.block, block)) {
+            mismatches.push({
+              code: "block_content_mismatch",
+              path: `/blocks/${blockId}`,
+              message: "Block content did not match the requested replacement.",
+            });
+          }
+          if (childrenWereSupplied !== undefined) {
+            const persistedChildIds = childBlocks(persisted.block).map(
+              ({ id }) => id,
+            );
+            if (
+              JSON.stringify(persistedChildIds) !==
+              JSON.stringify(expectedChildIds)
+            ) {
+              mismatches.push({
+                code: "child_ids_mismatch",
+                path: `/blocks/${blockId}/children`,
+                message:
+                  "Child IDs did not match the expected " +
+                  (childrenWereSupplied ? "replacement" : "preservation") +
+                  ".",
+              });
+            }
+          }
+          return mismatches;
+        },
+      });
 
-    const childrenWereSupplied =
-      block.type === "TextBlock" || block.type === "GroupBlock"
-        ? block.blocks !== undefined
-        : block.type === "GridBlock"
-          ? block.columns !== undefined
-          : undefined;
-    const previousChildIds = childBlocks(located.block).map(({ id }) => id);
-
-    const object = await client.blocks.block.update({
-      id,
-      blockId,
-      propertyId: located.propertyId,
-      block,
-    });
-
-    const persisted = findBlock(object, blockId, located.propertyId);
-    if (!persisted || persisted.block.type !== block.type) {
-      throw new Error(
-        "Capacities returned from update_block without the requested block persisted.",
-      );
-    }
-    const persistedChildIds = childBlocks(persisted.block).map(({ id }) => id);
-    if (
-      childrenWereSupplied === false &&
-      JSON.stringify(persistedChildIds) !== JSON.stringify(previousChildIds)
-    ) {
-      throw new Error(
-        "Capacities returned from update_block but omitted children were not preserved.",
-      );
-    }
-
-    return {
-      status: "updated",
-      object,
-      verification: {
-        blockId,
-        propertyId: located.propertyId,
-        type: persisted.block.type,
-        childBehavior:
-          childrenWereSupplied === undefined
-            ? "not_applicable"
-            : childrenWereSupplied
-              ? "replaced"
-              : "preserved",
-      },
-    };
-  });
+      return {
+        status: "updated",
+        object: readback.object,
+        verification: {
+          ...readback.verification,
+          blockId,
+          propertyId: located.propertyId,
+          type: block.type,
+          childBehavior:
+            childrenWereSupplied === undefined
+              ? "not_applicable"
+              : childrenWereSupplied
+                ? "replaced"
+                : "preserved",
+        },
+      };
+    }),
+  );
 }

@@ -1,8 +1,17 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, getStructures, runTool } from "../lib/client";
+import {
+  apiCall,
+  getClient,
+  getStructures,
+  runTool,
+  withObjectMutationLock,
+} from "../lib/client";
 import { normalizePropertyFields, resolveStructure } from "../lib/properties";
+import { checkObjectState, readbackObject } from "../lib/readback";
 import { authSchema, fieldsSchema, objectIdSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   id: objectIdSchema,
@@ -36,45 +45,67 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function updateObject({
-  id,
-  title,
-  fields,
-  collections,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  return runTool(async () => {
-    if (
-      title === undefined &&
-      fields === undefined &&
-      collections === undefined
-    ) {
-      throw new Error(
-        "Provide at least one of title, fields, or collections to update.",
+export default async function updateObject(
+  { id, title, fields, collections, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(() =>
+    withObjectMutationLock(id, async () => {
+      if (
+        title === undefined &&
+        fields === undefined &&
+        collections === undefined
+      ) {
+        throw new Error(
+          "Provide at least one of title, fields, or collections to update.",
+        );
+      }
+
+      const client = getClient(apiToken);
+      const [object, structures] = await Promise.all([
+        apiCall(() => client.object.get({ id }), {
+          signal: extra?.signal,
+          stage: "precondition_read",
+        }),
+        getStructures(client, false, extra?.signal),
+      ]);
+      const structure = resolveStructure(structures, object.structureId);
+      const properties =
+        fields !== undefined || title !== undefined
+          ? {
+              ...(fields ? normalizePropertyFields(structure, fields) : {}),
+              ...(title !== undefined
+                ? normalizePropertyFields(structure, { title })
+                : {}),
+            }
+          : undefined;
+      const updated = await apiCall(
+        () =>
+          client.object.update({
+            id,
+            properties,
+            collections,
+          }),
+        { signal: extra?.signal, stage: "mutation" },
       );
-    }
+      const readback = await readbackObject({
+        client,
+        id,
+        fallback: updated,
+        signal: extra?.signal,
+        check: checkObjectState({
+          id,
+          structureId: object.structureId,
+          properties,
+          collections,
+        }),
+      });
 
-    const client = getClient(apiToken);
-    const [object, structures] = await Promise.all([
-      client.object.get({ id }),
-      getStructures(client),
-    ]);
-    const structure = resolveStructure(structures, object.structureId);
-    const properties =
-      fields !== undefined || title !== undefined
-        ? {
-            ...(fields ? normalizePropertyFields(structure, fields) : {}),
-            ...(title !== undefined
-              ? normalizePropertyFields(structure, { title })
-              : {}),
-          }
-        : undefined;
-    const updated = await client.object.update({
-      id,
-      properties,
-      collections,
-    });
-
-    return { status: "updated", object: updated };
-  });
+      return {
+        status: "updated",
+        object: readback.object,
+        verification: readback.verification,
+      };
+    }),
+  );
 }

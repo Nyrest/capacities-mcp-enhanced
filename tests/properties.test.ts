@@ -209,6 +209,25 @@ describe("agent property normalization", () => {
       normalizePropertyFields(structure, { Updated: "2026-07-25" }),
     ).toThrow("read-only");
   });
+
+  test("treats lastUpdatedAt as read-only even if the upstream catalog says writable", () => {
+    const inconsistent = {
+      ...structure,
+      propertyDefinitions: structure.propertyDefinitions.map((definition) =>
+        definition.type === "lastUpdatedAt"
+          ? { ...definition, writable: true }
+          : definition,
+      ),
+    };
+    const guideField = createAgentWriteGuide(inconsistent).fields.find(
+      ({ type }) => type === "lastUpdatedAt",
+    );
+
+    expect(guideField?.writable).toBe(false);
+    expect(() =>
+      normalizePropertyFields(inconsistent, { Updated: "2026-07-25" }),
+    ).toThrow("read-only");
+  });
 });
 
 describe("daily-note dates", () => {

@@ -1,12 +1,20 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
 import { resolveAppendPropertyId } from "../lib/blocks";
-import { getClient, runTool } from "../lib/client";
+import {
+  apiCall,
+  getClient,
+  runTool,
+  withObjectMutationLock,
+} from "../lib/client";
+import { allBlockIds, checkObjectState, readbackObject } from "../lib/readback";
 import {
   authSchema,
   objectIdSchema,
   writableBlocksSchema,
 } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 function getInsertPosition(
   position: "end" | "start" | "after_block",
@@ -65,47 +73,91 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function appendContent({
-  id,
-  blocks,
-  position,
-  afterBlockId,
-  parentBlockId,
-  propertyId,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  return runTool(async () => {
-    if (position === "after_block" && !afterBlockId) {
-      throw new Error("afterBlockId is required when position is after_block.");
-    }
-    if (position !== "after_block" && afterBlockId) {
-      throw new Error(
-        "afterBlockId can only be used when position is after_block.",
-      );
-    }
-    if (position === "after_block" && parentBlockId) {
-      throw new Error(
-        "parentBlockId cannot be combined with position after_block.",
-      );
-    }
+export default async function appendContent(
+  {
+    id,
+    blocks,
+    position,
+    afterBlockId,
+    parentBlockId,
+    propertyId,
+    apiToken,
+  }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(() =>
+    withObjectMutationLock(id, async () => {
+      if (position === "after_block" && !afterBlockId) {
+        throw new Error(
+          "afterBlockId is required when position is after_block.",
+        );
+      }
+      if (position !== "after_block" && afterBlockId) {
+        throw new Error(
+          "afterBlockId can only be used when position is after_block.",
+        );
+      }
+      if (position === "after_block" && parentBlockId) {
+        throw new Error(
+          "parentBlockId cannot be combined with position after_block.",
+        );
+      }
 
-    const client = getClient(apiToken);
-    const resolvedPropertyId =
-      parentBlockId || afterBlockId
-        ? resolveAppendPropertyId(await client.object.get({ id }), {
-            propertyId,
+      const client = getClient(apiToken);
+      const before = await apiCall(() => client.object.get({ id }), {
+        signal: extra?.signal,
+        stage: "precondition_read",
+      });
+      const resolvedPropertyId = resolveAppendPropertyId(before, {
+        propertyId,
+        parentBlockId,
+        afterBlockId,
+      });
+      const object = await apiCall(
+        () =>
+          client.blocks.append({
+            id,
+            blocks,
+            propertyId: resolvedPropertyId,
             parentBlockId,
-            afterBlockId,
-          })
-        : propertyId;
-    const object = await client.blocks.append({
-      id,
-      blocks,
-      propertyId: resolvedPropertyId,
-      parentBlockId,
-      position: getInsertPosition(position, afterBlockId),
-    });
+            position: getInsertPosition(position, afterBlockId),
+          }),
+        { signal: extra?.signal, stage: "mutation" },
+      );
+      const beforeIds = new Set(allBlockIds(before));
+      const appendedIds = allBlockIds(object).filter(
+        (id) => !beforeIds.has(id),
+      );
+      const baseCheck = checkObjectState({
+        id,
+        structureId: before.structureId,
+        presentBlockIds: appendedIds,
+      });
+      const readback = await readbackObject({
+        client,
+        id,
+        fallback: object,
+        signal: extra?.signal,
+        check: (snapshot) => [
+          ...(appendedIds.length === 0
+            ? [
+                {
+                  code: "append_no_new_block" as const,
+                  path: "/blocks",
+                  message:
+                    "Mutation response identified no newly appended block IDs.",
+                },
+              ]
+            : []),
+          ...baseCheck(snapshot),
+        ],
+      });
 
-    return { status: "appended", object };
-  });
+      return {
+        status: "appended",
+        object: readback.object,
+        verification: readback.verification,
+      };
+    }),
+  );
 }

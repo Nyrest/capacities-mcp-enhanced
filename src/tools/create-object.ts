@@ -1,16 +1,19 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
 import {
-  formatError,
+  apiCall,
   getClient,
   getStructures,
-  toolResult,
+  McpToolError,
+  normalizeError,
+  runTool,
 } from "../lib/client";
 import {
   assertStandardObjectCreateSupported,
   normalizePropertyFields,
   resolveStructure,
 } from "../lib/properties";
+import { allBlockIds, checkObjectState, readbackObject } from "../lib/readback";
 import {
   authSchema,
   fieldsSchema,
@@ -18,6 +21,8 @@ import {
   structureSchema,
   writableBlocksSchema,
 } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   structure: structureSchema,
@@ -46,17 +51,20 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function createObject({
-  structure: structureIdentifier,
-  title,
-  blocks,
-  fields,
-  collections,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  const operation = async () => {
+export default async function createObject(
+  {
+    structure: structureIdentifier,
+    title,
+    blocks,
+    fields,
+    collections,
+    apiToken,
+  }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(async () => {
     const client = getClient(apiToken);
-    const structures = await getStructures(client);
+    const structures = await getStructures(client, false, extra?.signal);
     const structure = resolveStructure(structures, structureIdentifier);
     assertStandardObjectCreateSupported(structure);
     const properties = {
@@ -64,36 +72,75 @@ export default async function createObject({
       ...normalizePropertyFields(structure, { title }),
     };
 
-    const object = await client.object.create({
-      structureId: structure.id,
-      properties,
-      collections,
-    });
+    const object = await apiCall(
+      () =>
+        client.object.create({
+          structureId: structure.id,
+          properties,
+          collections,
+        }),
+      { signal: extra?.signal, stage: "mutation" },
+    );
 
     if (!blocks) {
-      return toolResult({ status: "created", object });
+      const readback = await readbackObject({
+        client,
+        id: object.id,
+        fallback: object,
+        signal: extra?.signal,
+        check: checkObjectState({
+          id: object.id,
+          structureId: structure.id,
+          properties,
+          collections,
+        }),
+      });
+      return {
+        status: "created",
+        object: readback.object,
+        verification: readback.verification,
+      };
     }
 
     try {
-      const updated = await client.blocks.append({
+      const updated = await apiCall(
+        () =>
+          client.blocks.append({
+            id: object.id,
+            blocks,
+          }),
+        { signal: extra?.signal, stage: "mutation" },
+      );
+      const readback = await readbackObject({
+        client,
         id: object.id,
-        blocks,
+        fallback: updated,
+        signal: extra?.signal,
+        check: checkObjectState({
+          id: object.id,
+          structureId: structure.id,
+          properties,
+          collections,
+          presentBlockIds: allBlockIds(updated),
+        }),
       });
-      return toolResult({ status: "created", object: updated });
+      return {
+        status: "created",
+        object: readback.object,
+        verification: readback.verification,
+      };
     } catch (error) {
-      return toolResult({
-        status: "partial",
-        object,
-        warning:
-          "The object and its structural properties were created, but the structural blocks could not be appended.",
-        error: formatError(error),
-      });
+      throw new McpToolError(
+        "mcp_partial_failure",
+        "The object and its structural properties were created, but the structural blocks could not be appended.",
+        {
+          stage: "append_blocks",
+          recoverableObjectId: object.id,
+          cause: normalizeError(error),
+          recovery:
+            "Retry append_content for this object ID, or delete the object.",
+        },
+      );
     }
-  };
-
-  try {
-    return await operation();
-  } catch (error) {
-    throw new Error(formatError(error));
-  }
+  });
 }

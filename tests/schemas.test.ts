@@ -4,7 +4,11 @@ import {
   agentWritableBlockSchema,
   agentWritableTokenSchema,
 } from "../src/lib/content-schema";
-import { agentPropertyValueSchema } from "../src/lib/schemas";
+import {
+  agentIconValueSchema,
+  agentPropertyValueSchema,
+  toolOutputEnvelopeSchema,
+} from "../src/lib/schemas";
 import { sourceUrlSchema } from "../src/lib/url";
 
 const paragraph = {
@@ -18,6 +22,30 @@ const paragraph = {
   ],
   hierarchy: { key: "Base" as const, val: 0 as const },
 };
+
+describe("tool output contract", () => {
+  test("accepts only the v4 success and error envelopes", () => {
+    expect(
+      toolOutputEnvelopeSchema.safeParse({
+        isError: false,
+        data: { status: "ok" },
+      }).success,
+    ).toBe(true);
+    expect(
+      toolOutputEnvelopeSchema.safeParse({
+        isError: true,
+        error: { code: "mcp_invalid_request", message: "Bad input." },
+      }).success,
+    ).toBe(true);
+    expect(
+      toolOutputEnvelopeSchema.safeParse({
+        isError: false,
+        data: { status: "ok" },
+        error: { code: "wrong-branch", message: "No." },
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe("strict documented block schema", () => {
   test("accepts canonical nested blocks and remains SDK-compatible", () => {
@@ -157,6 +185,37 @@ describe("agent property input schema", () => {
     expect(
       agentPropertyValueSchema.safeParse({ start: "tomorrow" }).success,
     ).toBe(false);
+  });
+
+  test("accepts regular Phosphor icons and rejects other or styled sets", () => {
+    expect(
+      agentIconValueSchema.safeParse({
+        type: "iconify",
+        value: "ph-lightbulb",
+      }).success,
+    ).toBe(true);
+    expect(
+      agentIconValueSchema.safeParse({
+        type: "emoji",
+        value: "🧪",
+      }).success,
+    ).toBe(true);
+
+    for (const value of [
+      "mdi-star",
+      "ph-star-fill",
+      "ph-star-duotone",
+      "ph-star-bold",
+      "ph-star-light",
+      "ph-star-thin",
+    ]) {
+      expect(
+        agentIconValueSchema.safeParse({
+          type: "iconify",
+          value,
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 

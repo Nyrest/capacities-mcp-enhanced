@@ -1,7 +1,9 @@
 import type { InferSchema, ToolMetadata } from "xmcp";
 import { z } from "zod";
-import { getClient, runTool } from "../lib/client";
+import { apiCall, getClient, runTool, withObjectReadLock } from "../lib/client";
 import { authSchema, objectIdSchema } from "../lib/schemas";
+
+export { toolOutputSchema as outputSchema } from "../lib/schemas";
 
 export const schema = {
   id: objectIdSchema,
@@ -28,18 +30,25 @@ export const metadata: ToolMetadata = {
   },
 };
 
-export default async function getObject({
-  id,
-  format,
-  apiToken,
-}: InferSchema<typeof schema>) {
-  return runTool(async () => {
-    const client = getClient(apiToken);
-    const object =
-      format === "structured"
-        ? await client.object.get({ id })
-        : await client.object.markdown.get({ id });
+export default async function getObject(
+  { id, format, apiToken }: InferSchema<typeof schema>,
+  extra?: { signal?: AbortSignal },
+) {
+  return runTool(() =>
+    withObjectReadLock(id, async () => {
+      const client = getClient(apiToken);
+      const object =
+        format === "structured"
+          ? await apiCall(() => client.object.get({ id }), {
+              signal: extra?.signal,
+              stage: "discovery",
+            })
+          : await apiCall(() => client.object.markdown.get({ id }), {
+              signal: extra?.signal,
+              stage: "discovery",
+            });
 
-    return { format, object };
-  });
+      return { format, object };
+    }),
+  );
 }
