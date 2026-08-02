@@ -3,7 +3,7 @@ import { z } from "zod";
 import { apiCall, getClient, runTool, withObjectReadLock } from "../lib/client";
 import { authSchema, objectIdSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { getObjectOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   id: objectIdSchema,

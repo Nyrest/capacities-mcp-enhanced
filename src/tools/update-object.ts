@@ -11,7 +11,7 @@ import { normalizePropertyFields, resolveStructure } from "../lib/properties";
 import { checkObjectState, readbackObject } from "../lib/readback";
 import { authSchema, fieldsSchema, objectIdSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { objectMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   id: objectIdSchema,

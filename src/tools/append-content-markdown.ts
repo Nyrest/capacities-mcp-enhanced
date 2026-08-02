@@ -15,7 +15,7 @@ import {
 import { allBlockIds, checkObjectState, readbackObject } from "../lib/readback";
 import { authSchema, markdownBodySchema, objectIdSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { markdownMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 function getInsertPosition(
   position: "end" | "start" | "after_block",

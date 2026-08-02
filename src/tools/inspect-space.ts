@@ -9,7 +9,7 @@ import {
 } from "../lib/properties";
 import { authSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { inspectSpaceOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   structure: z

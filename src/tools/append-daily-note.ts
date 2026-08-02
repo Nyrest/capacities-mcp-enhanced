@@ -5,7 +5,7 @@ import { canonicalDailyDate } from "../lib/properties";
 import { asynchronousVerification } from "../lib/readback";
 import { authSchema, writableBlocksSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { dailyNoteOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   blocks: writableBlocksSchema,

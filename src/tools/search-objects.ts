@@ -4,7 +4,7 @@ import { apiCall, getClient, getStructures, runTool } from "../lib/client";
 import { resolveStructure } from "../lib/properties";
 import { authSchema, structureSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { searchObjectsOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   query: z

@@ -8,7 +8,7 @@ import {
 } from "../lib/schemas";
 import { startUploadJob, type UploadJobSnapshot } from "../lib/upload-jobs";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { uploadFilesOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   files: uploadFilesSchema,

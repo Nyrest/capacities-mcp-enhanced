@@ -18,7 +18,7 @@ import {
   writableBlockSchema,
 } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { objectMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   id: objectIdSchema,

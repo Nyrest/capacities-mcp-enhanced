@@ -78,9 +78,16 @@ function verifyOutputEnvelope(toolName: string, schema?: JsonSchema): void {
     schema.properties?.isError?.type === "boolean",
     `${toolName}.outputSchema.isError must be boolean`,
   );
+  const dataSchema = schema.properties?.data;
+  const dataVariants = dataSchema ? variants(dataSchema) : [];
+  const concreteDataVariants =
+    dataVariants.length > 0 ? dataVariants : [dataSchema];
   expect(
-    schema.properties?.data?.type === "object" &&
-      schema.properties.data.additionalProperties !== false,
+    concreteDataVariants.every(
+      (candidate) =>
+        candidate?.type === "object" &&
+        candidate.additionalProperties !== false,
+    ),
     `${toolName}.outputSchema must expose the success data object`,
   );
   expect(
@@ -92,6 +99,43 @@ function verifyOutputEnvelope(toolName: string, schema?: JsonSchema): void {
       schema.properties.error.required.includes("message"),
     `${toolName}.outputSchema.error must require code and message`,
   );
+
+  const expectedFields: Record<string, string[]> = {
+    append_content: ["status", "object", "verification"],
+    append_content_markdown: ["status", "object", "verification", "lossReport"],
+    append_daily_note: ["status", "date", "noTimestamp", "verification"],
+    append_daily_note_markdown: [
+      "status",
+      "date",
+      "noTimestamp",
+      "verification",
+      "lossReport",
+    ],
+    create_object: ["status", "object", "verification"],
+    create_object_from_url: ["status", "object", "verification"],
+    create_object_from_url_markdown: [
+      "status",
+      "object",
+      "verification",
+      "lossReport",
+    ],
+    create_object_markdown: ["status", "object", "verification", "lossReport"],
+    delete_block: ["status", "object", "verification"],
+    delete_object: ["status", "id", "verification"],
+    get_object: ["format", "object"],
+    inspect_space: ["space", "structure", "writeGuide", "structures"],
+    manage_upload_job: ["action", "jobId", "status", "items"],
+    search_objects: ["query", "count", "results"],
+    update_block: ["status", "object", "verification"],
+    update_object: ["status", "object", "verification"],
+    upload_files: ["jobId", "status", "items"],
+  };
+  for (const field of expectedFields[toolName] ?? []) {
+    expect(
+      concreteDataVariants.some((candidate) => candidate?.properties?.[field]),
+      `${toolName}.outputSchema.data must expose ${field}`,
+    );
+  }
 }
 
 function verifyStructuralSchema(schema: JsonSchema): void {

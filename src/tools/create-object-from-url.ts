@@ -15,7 +15,7 @@ import {
   sourceUrlSchema,
 } from "../lib/url";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { objectMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   url: sourceUrlSchema,

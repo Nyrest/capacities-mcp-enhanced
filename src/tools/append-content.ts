@@ -14,7 +14,7 @@ import {
   writableBlocksSchema,
 } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { objectMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 function getInsertPosition(
   position: "end" | "start" | "after_block",

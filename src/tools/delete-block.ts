@@ -10,7 +10,7 @@ import {
 import { checkObjectState, readbackObject } from "../lib/readback";
 import { authSchema, objectIdSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { deleteBlockOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   id: objectIdSchema,

@@ -14,7 +14,7 @@ import {
   sourceUrlSchema,
 } from "../lib/url";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { markdownMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   url: sourceUrlSchema,

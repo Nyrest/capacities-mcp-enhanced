@@ -9,7 +9,7 @@ import {
 import { readbackDeletedObject } from "../lib/readback";
 import { authSchema, objectIdSchema } from "../lib/schemas";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { deleteObjectOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   id: objectIdSchema,

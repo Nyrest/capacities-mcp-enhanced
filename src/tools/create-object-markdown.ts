@@ -31,7 +31,7 @@ import {
 } from "../lib/schemas";
 import { rollbackMarkdownCreate } from "../lib/transactions";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { markdownMutationOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   structure: structureSchema,

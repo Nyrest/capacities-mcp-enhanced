@@ -9,7 +9,7 @@ import {
   waitForUploadJob,
 } from "../lib/upload-jobs";
 
-export { toolOutputSchema as outputSchema } from "../lib/schemas";
+export { manageUploadJobOutputSchema as outputSchema } from "../lib/tool-output-schemas";
 
 export const schema = {
   jobId: uploadJobIdSchema,
