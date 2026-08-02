@@ -23,7 +23,12 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false  # never use caching in release builds
-      - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test
-      - run: npm publish  # Or: npm stage publish
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun test
+      - run: npm publish  # Keep npm for trusted publishing via GitHub OIDC
