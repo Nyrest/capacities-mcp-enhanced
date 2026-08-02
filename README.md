@@ -8,14 +8,14 @@ Capacities MCP brings rich, read-write access to your knowledge base through one
 
 ## ✨ Why Capacities MCP Enhanced
 
-- **Two first-class authoring engines** — fast Markdown writing and precise structured blocks in one server.
-- **Full CRUD with Capacities API 2.0** — objects, custom properties, collections, blocks, web links, tasks, tags, and Daily Notes.
-- **Designed for autonomous agents** — live schema discovery, consistent responses, focused tools, and clear recovery information.
-- **Safer writes** — independent readback verification, soft deletion by default, API-key rate-limit failover, and rollback for failed multi-stage Markdown creates.
-- **Concurrency-safe object operations** — same-object reads can run concurrently, while writes use an exclusive lock and automatically wait for active reads or other writes; different objects proceed concurrently.
-- **Faithful rich content** — headings, nested blocks, grids, toggles, tasks, links, entity references, colors, code, and math.
-- **Agent-friendly media uploads** — stream one or many local files, report progress, verify media objects, and manage long-running jobs without exposing multipart internals.
-- **Bundled best-practice skill** — a complete agent operating guide is included, so a model can use the server correctly without already knowing Capacities.
+- ✍️ **Markdown & structured block authoring** — combine fast Markdown workflows with precise Capacities-native block editing in one server.
+- 🧩 **Full CRUD with Capacities API 2.0** — objects, custom properties, collections, blocks, web links, tasks, tags, and Daily Notes.
+- 🤖 **Designed for autonomous agents** — live schema discovery, consistent responses, focused tools, and clear recovery information.
+- 📤 **Agent-friendly MCP file uploads** — support multi-file and large-file uploads with built-in MCP progress reporting, streaming transfers, upload verification, and long-running job tracking.
+- 🔑 **API key pooling** — distribute requests across multiple API keys, improve throughput under rate limits, and provide resilient API access for high-volume workloads.
+- 🔒 **Concurrency-safe object operations** — same-object reads can run concurrently, while writes use an exclusive lock and automatically wait for active reads or other writes; different objects proceed concurrently.
+- 🎨 **Faithful rich content** — headings, nested blocks, grids, toggles, tasks, links, entity references, colors, code, and math.
+- 📚 **Bundled best-practice skill** — a complete agent operating guide is included, so a model can use the server correctly without already knowing Capacities.
 
 ## 🚀 Quick start
 
