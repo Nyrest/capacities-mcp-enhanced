@@ -1,0 +1,50 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "Nyrest"
+  ],
+  "description": "An agent-oriented MCP server for Capacities API 2.0 with precise block-level CRUD, Markdown and structured content authoring, file uploads, API key pooling, concurrency-safe writes, and Daily Notes support.",
+  "homepage": "https://github.com/Nyrest/capacities-mcp-enhanced",
+  "repository": "https://github.com/Nyrest/capacities-mcp-enhanced",
+  "license": "MIT",
+  "environmentVariables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "CAPACITIES_API_TOKEN": {
+          "type": "string",
+          "description": "One Capacities API 2.0 token, or multiple tokens separated by commas or semicolons. All tokens must belong to the same Capacities space and have the same permissions."
+        },
+        "CAPACITIES_MCP_READBACK": {
+          "type": "string",
+          "enum": [
+            "true",
+            "false"
+          ],
+          "default": "true",
+          "description": "Controls mutation readback verification. Set to false to disable ordinary mutation readback."
+        }
+      },
+      "required": [
+        "CAPACITIES_API_TOKEN"
+      ],
+      "additionalProperties": false
+    },
+    "placeholderArguments": [
+      "CAPACITIES_API_TOKEN"
+    ]
+  },
+  "tags": [
+    "capacities",
+    "mcp",
+    "mcp-server",
+    "knowledge-management",
+    "note-taking",
+    "ai-agents",
+    "agent-friendly",
+    "markdown",
+    "structured-content",
+    "file-upload",
+    "typescript"
+  ]
+}
